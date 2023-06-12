@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+from skbio.stats.composition import clr
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler
+import pandas as pd
+import pandas as pd
+import argparse
+import matplotlib.pyplot as plt
+import sys
+import utils
+
+def norm(df):
+    return df.T.div(df.sum(axis=1), axis=1).T
+
+def Standard(df):
+    scaledDf = pd.DataFrame(
+            StandardScaler().fit_transform(df),
+            index=df.index,
+            columns=df.columns)
+    return scaledDf
+
+def minmax(df):
+    scaledDf = pd.DataFrame(
+            MinMaxScaler().fit_transform(df),
+            index=df.index,
+            columns=df.columns)
+    return scaledDf
+
+def log(df):
+    return df.apply(np.log1p)
+
+def clr(df, axis=0):
+    return pd.DataFrame(clr(df), index=df.index, columns=df.columns)
+
+def filter(df, min_unique=0, thresh=None):
+    import numpy as np
+    df = df.loc[
+            df.agg(np.count_nonzero, axis=1) > min_unique,
+            df.agg(np.count_nonzero, axis=0) > min_unique]
+    if thresh:
+        df = df.loc[:, df.abs().gt(thresh).any(axis=0)]
+    return df
+
+def mult(df):
+    import pandas as pd
+    from skbio.stats.composition import multiplicative_replacement as mul
+    return pd.DataFrame(mul(df), index=df.index, columns=df.columns)
+
+def extremes(df, n=50):
+    import pandas as pd
+    return pd.concat([df.sort_values().head(n),
+                      df.sort_values().tail(n)])
+
+def taxofunc(msp, taxo, short=False):
+    import pandas as pd
+    m, t = msp.copy(), taxo.copy()
+    t['superkingdom'] = 'k_' + t['superkingdom']
+    t['phylum'] = t[['superkingdom', 'phylum']].apply(lambda x: '|p_'.join(x.dropna().astype(str).values), axis=1)
+    t['class'] = t[['phylum', 'class']].apply(lambda x: '|c_'.join(x.dropna().astype(str).values), axis=1)
+    t['order'] = t[['class', 'order']].apply(lambda x: '|o_'.join(x.dropna().astype(str).values), axis=1)
+    t['family'] = t[['order', 'family']].apply(lambda x: '|f_'.join(x.dropna().astype(str).values), axis=1)
+    t['genus'] = t[['family', 'genus']].apply(lambda x: '|g_'.join(x.dropna().astype(str).values), axis=1)
+    t['species'] = t[['genus', 'species']].apply(lambda x: '|s_'.join(x.dropna().astype(str).values), axis=1)
+    mt = m.join(t, how='inner')
+    df = pd.concat([mt.set_index(t.columns[i])._get_numeric_data().groupby(level=0).sum() for i in range(len(t.columns))])
+    df.index = df.index.str.replace(" ", "_", regex=True).str.replace('/.*','', regex=True)
+    if short:
+        df.index = df.T.add_prefix("|").T.index.str.extract(".*\|([a-z]_.*$)", expand=True)[0]
+    df = df.loc[df.sum(axis=1) != 0, df.sum(axis=0) != 0]
+    return df
+
+
+if __name__ == '__main__':
+    args, kwargs = utils.reader() 
+    output = pointheatmap(*args, **kwargs)
+    utils.writer(output)
