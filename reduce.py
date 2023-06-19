@@ -73,5 +73,4 @@ def UMAP(df):
 
 if __name__ == '__main__':
     args, kwargs = utils.reader() 
-    output = main(*args, **kwargs)
-    utils.writer(output)
+    main(*args, **kwargs)

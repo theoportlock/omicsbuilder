@@ -1,27 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import matplotlib.pyplot as plt
+
+from matplotlib.patches import Ellipse
 import argparse
+import matplotlib
+import matplotlib.pyplot as plt
+import matplotlib.transforms as transforms
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import statannot
 import sys
 import utils
-    import pandas as pd
-    import statannot
-    import matplotlib.pyplot as plt
-    import pandas as pd
-    import seaborn as sns
-    import numpy as np
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Ellipse
-    import matplotlib.transforms as transforms
-    import numpy as np
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    import pandas as pd
-    import matplotlib
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    import matplotlib
-    import pandas as pd
 
 def setupplot():
     #matplotlib.use('Agg')
@@ -136,13 +126,13 @@ def spindleplot(df, x='PC1', y='PC2', ax=None, palette=None):
     i = j.reset_index().index[0]
     for i in j.reset_index().index:
         ax.plot(
-                j[['PC1','nPC1']].iloc[i],
-                j[['PC2','nPC2']].iloc[i],
-                linewidth = 1,
-                color = j['colours'].iloc[i],
-                zorder=1,
-                alpha=0.3
-                )
+            j[['PC1','nPC1']].iloc[i],
+            j[['PC2','nPC2']].iloc[i],
+            linewidth = 1,
+            color = j['colours'].iloc[i],
+            zorder=1,
+            alpha=0.3
+        )
         ax.scatter(j.PC1.iloc[i], j.PC2.iloc[i], color = j['colours'].iloc[i], s=3)
     for i in centers.index:
         ax.text(centers.loc[i,'nPC1']+0.01,centers.loc[i,'nPC2'], s=i, zorder=3)
@@ -229,7 +219,7 @@ def box(**kwargs):
             pvalues=stats,
             text_format='star',
             verbose=0,
-            )
+        )
     except: pass
     return ax
 
@@ -350,7 +340,6 @@ def changeplot(subject, fcthresh=1, pvalthresh=0.0000000005):
     plt.savefig(f'../results/{subject}decreasechangeplot.svg')
     plt.show()
 
-
 def networkplot(G, group=None):
     import matplotlib.pyplot as plt
     from itertools import count
@@ -370,7 +359,26 @@ def networkplot(G, group=None):
     plt.colorbar(ax)
     return ax
 
+def venn(df1, df2, df3):
+    from matplotlib_venn import venn3
+    from itertools import combinations
+    def combs(x): return [c for i in range(1, len(x)+1) for c in combinations(x,i)]
+    comb = combs([df1, df2, df3])
+    result = []
+    for i in comb:
+        if len(i) > 1:
+            result.append(len(set.intersection(*(set(j.columns) for j in i))))
+        else:
+            result.append(len(i[0].columns))
+    venn3(subsets = result)
+
 if __name__ == '__main__':
-    args, kwargs = utils.reader() 
-    output = pointheatmap(*args, **kwargs)
-    utils.writer(output)
+    setupplot()
+    parser = argparse.ArgumentParser(description='Plot - Produces a plot of a given dataset')
+    parser.add_argument('subject')
+    parser.add_argument('-m', '--mult')
+    parser.add_argument('-p', '--perm')
+    args = parser.parse_args()
+    args = {k: v for k, v in vars(args).items() if v is not None}
+    output = change(**args)
+    print(*output)
