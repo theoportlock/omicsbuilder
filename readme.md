@@ -1,3 +1,4 @@
+# Omicsbuilder
 A platform for mutiomics analysis
 
 Scripts are:
@@ -13,3 +14,6 @@ stratify
 variance
 
 Ability to add user defined scripts
+
+# TODO
+use prettytable to visualise output/input
