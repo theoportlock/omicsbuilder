@@ -1,17 +1,20 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+from itertools import combinations
+from itertools import count
 from matplotlib.patches import Ellipse
+from matplotlib_venn import venn3
+from upsetplot import UpSet, from_contents
 import argparse
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.transforms as transforms
+import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import statannot
-import sys
-import utils
 
 def setupplot():
     #matplotlib.use('Agg')
@@ -20,7 +23,7 @@ def setupplot():
     matplotlib.rcParams["svg.fonttype"] = "none"
     matplotlib.rcParams["font.size"] = 7
     matplotlib.rcParams["lines.linewidth"] = linewidth
-    matplotlib.rcParams["figure.figsize"] = (4, 4)
+    matplotlib.rcParams["figure.figsize"] = (3, 3)
     matplotlib.rcParams["axes.linewidth"] = linewidth
     matplotlib.rcParams['axes.facecolor'] = 'none'
     matplotlib.rcParams['xtick.major.width'] = linewidth
@@ -28,7 +31,15 @@ def setupplot():
     matplotlib.rcParams['font.family'] = 'Arial'
     matplotlib.rcParams['axes.axisbelow'] = True
 
-def clustermap(df, sig=None, figsize=(4,5), **kwargs):
+def clustermap(subject, sig=None, figsize=(4,4), corr=False,  **kwargs):
+    if not sig is None:
+        sig = pd.read_csv(f'../results/{sig}.tsv', sep='\t', index_col=0)
+    if corr:
+        stackdf = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=[0,1])
+        sig = stackdf.sig.unstack().fillna(0)
+        df = stackdf.rho.unstack().fillna(0)
+    else:
+        df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     g = sns.clustermap(
         data=df,
         cmap="vlag",
@@ -54,10 +65,12 @@ def clustermap(df, sig=None, figsize=(4,5), **kwargs):
     plt.setp(g.ax_heatmap.get_xticklabels(), rotation=40, ha="right")
     return g
 
-def heatmap(df, sig=None, ax=None):
+def heatmap(subject, sig=None, ax=None):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     if ax is None: fig, ax= plt.subplots()
     pd.set_option("use_inf_as_na", True)
     if not sig is None:
+        sig = pd.read_csv(f'../results/{sig}.tsv', sep='\t', index_col=0)
         df = df[(sig < 0.05).sum(axis=1) > 0]
         sig = sig.loc[df.index]
     g = sns.heatmap(
@@ -92,7 +105,8 @@ def heatmap(df, sig=None, ax=None):
     plt.setp(g.get_xticklabels(), rotation=40, ha="right")
     return g
 
-def pointheatmap(df, ax=None, size_scale=300):
+def pointheatmap(subject, ax=None, size_scale=300):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     df.columns.name='x'
     df.index.name='y'
     vals = df.unstack()
@@ -116,7 +130,8 @@ def pointheatmap(df, ax=None, size_scale=300):
     plt.grid()
     return ax
 
-def spindleplot(df, x='PC1', y='PC2', ax=None, palette=None):
+def spindle(subject, x='PC1', y='PC2', ax=None, palette=None):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     if palette is None: palette = pd.Series(sns.color_palette("hls", df.index.nunique()).as_hex(), index=df.index.unique())
     if ax is None: fig, ax= plt.subplots()
     centers = df.groupby(df.index).mean()
@@ -139,7 +154,8 @@ def spindleplot(df, x='PC1', y='PC2', ax=None, palette=None):
     ax.scatter(centers.nPC1, centers.nPC2, c='black', zorder=2, s=20, marker='+')
     return ax
 
-def polar(df):
+def polar(subject, **kwargs):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     palette = pd.Series(sns.color_palette("hls", df.index.nunique()).as_hex(), index=df.index.unique())
     ndf = df.loc[~df.index.str.contains('36'), df.columns.str.contains('Raw')].groupby(level=0).mean()
     data = ndf.T.copy().to_numpy()
@@ -160,8 +176,10 @@ def polar(df):
     ax.set_xticks(allangles[:-1])
     ax.set_xticklabels(categories)
     ax.grid(True)
+    return ax
 
-def abund(df, **kwargs):
+def abund(subject, **kwargs):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     kwargs['ax'] = plt.subplots()[1] if not kwargs.get('ax') else kwargs.get('ax')
     df.plot(kind='bar', stacked=True, width=0.9, cmap='tab20', **kwargs)
     plt.legend(bbox_to_anchor=(1.001, 1), loc='upper left', fontsize='small')
@@ -169,9 +187,9 @@ def abund(df, **kwargs):
     plt.setp(kwargs['ax'].get_xticklabels(), rotation=45, ha="right")
     return kwargs['ax']
 
-def bar(*args, **kwargs):
+def bar(subject, **kwargs):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     kwargs['ax'] = plt.subplots()[1] if not kwargs.get('ax') else kwargs.get('ax')
-    df = args[0].copy()
     if df.columns.shape[0] > 20:
         df['other'] = df[df.mean().sort_values().iloc[21:].index].sum(axis=1)
     df = df[df.median().sort_values(ascending=False).head(20).index]
@@ -183,35 +201,33 @@ def bar(*args, **kwargs):
     plt.setp(kwargs['ax'].get_xticklabels(), rotation=45, ha="right")
     return kwargs['ax']
 
-def box(**kwargs):
-    try:
-        stats = kwargs['stats']
+def scatter(subject, **kwargs):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
+    kwargs['ax'] = plt.subplots()[1] if not kwargs.get('ax') else kwargs.get('ax')
+    sns.lmplot(data=df, x=kwargs.get('x'), y=kwargs.get('y'))
+    return kwargs['ax']
+
+def box(subject, **kwargs):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t')
+    if not kwargs.get('x'): kwargs['x'] = df.columns[0]
+    if not kwargs.get('y'): kwargs['y'] = df.columns[1]
+    if not kwargs.get('ax'): kwargs['ax'] = plt.subplots()[1]
+    stats=None
+    if kwargs.get('stats'):
+        stats = pd.read_csv(f'../results/{kwargs.get("stats")}.tsv', sep='\t', index_col=0)
         del kwargs['stats']
-        stats = stats.loc[stats]
+        stats = stats.loc[kwargs.get('y'), 'sig']
         if stats.sum() > 0:
-            stats.loc[stats] = 0.05
-    except:
-        pass
-    try: ax = kwargs['ax']
-    except: fig, ax = plt.subplots(figsize=(4, 4))
-    try:
-        s = kwargs['s']
-        del kwargs['s']
-    except:
-        pass
-    sns.boxplot(showfliers=False, showcaps=False, **kwargs)
-    try: del kwargs['palette']
-    except: pass
-    try:
-        if kwargs['hue']:
-            kwargs['dodge'] = True
-    except: pass
-    sns.stripplot(s=2, color="0.2", **kwargs)
-    plt.setp(ax.get_xticklabels(), rotation=40, ha="right")
-    try:
+            stats.loc['sig'] = 0.05
+    sns.boxplot(data=df, showfliers=False, showcaps=False, **kwargs)
+    if kwargs.get('palette'): del kwargs['palette'] 
+    if kwargs.get('hue'): kwargs['dodge'] = True
+    sns.stripplot(data=df, s=2, color="0.2", **kwargs)
+    plt.setp(kwargs['ax'].get_xticklabels(), rotation=40, ha="right")
+    if stats:
         statannot.add_stat_annotation(
             ax,
-            data=kwargs['data'],
+            data=df,
             x=kwargs['x'],
             y=kwargs['y'],
             box_pairs=stats.index,
@@ -220,11 +236,13 @@ def box(**kwargs):
             text_format='star',
             verbose=0,
         )
-    except: pass
-    return ax
+    return kwargs['ax']
 
-def volcano(lfc, pval, fcthresh=1, pvalthresh=0.05, annot=False, ax=None):
+def volcano(subject, lfccol='lfc', sigcol='sig', fcthresh=1, pvalthresh=0.05, annot=False, ax=None, **kwargs):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     if not ax: fig, ax= plt.subplots()
+    lfc = df[lfccol]
+    pval = df[sigcol] 
     lpval = pval.apply(np.log10).mul(-1)
     ax.scatter(lfc, lpval, c='black', s=0.5)
     ax.axvline(0, color='gray', linestyle='--')
@@ -232,7 +250,7 @@ def volcano(lfc, pval, fcthresh=1, pvalthresh=0.05, annot=False, ax=None):
     ax.axhline(0, color='gray', linestyle='--')
     ax.axvline(fcthresh, color='red', linestyle='-')
     ax.axvline(-fcthresh, color='red', linestyle='-')
-    ax.set_ylabel('-log10 p-value')
+    ax.set_ylabel('-log10 q-value')
     ax.set_xlabel('log2 fold change')
     ax.set_ylim(ymin=-0.1)
     x_max = np.abs(ax.get_xlim()).max()
@@ -243,11 +261,13 @@ def volcano(lfc, pval, fcthresh=1, pvalthresh=0.05, annot=False, ax=None):
     if annot: [ax.text(sig.loc[i,'x'], sig.loc[i,'y'], s=i) for i in sig.index]
     return ax
 
-def aucroc(model, X, y, ax=None, colour=None):
+def aucroc(subject, X, y, ax=None, colour=None, **kwargs):
+    # Need to sort this so model is the pickle
+    model = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     from sklearn.metrics import auc
     from sklearn.metrics import roc_curve
     import matplotlib.pyplot as plt
-    if ax is None: fig, ax= plt.subplots(figsize=(4, 4))
+    if ax is None: fig, ax= plt.subplots()
     y_score = model.predict_proba(X)[:,1]
     fpr, tpr, _ = roc_curve(y_test, y_score)
     AUC = auc(fpr, tpr)
@@ -263,13 +283,14 @@ def aucroc(model, X, y, ax=None, colour=None):
     plt.legend(loc="lower right")
     return ax
 
-def newcurve(df, mapping, ax=None):
+def curve(subject, mapping=None, ax=None, **kwargs):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     from scipy import stats
     import seaborn as sns
     import pandas as pd
     import numpy as np
     import matplotlib.pyplot as plt
-    if ax is None: fig, ax= plt.subplots(figsize=(4, 4))
+    if ax is None: fig, ax= plt.subplots()
     df = df.apply(np.log1p).T
     df.loc['other'] = df[~df.index.isin(mapping.index)].sum()
     df = df.drop(df[~df.index.isin(mapping.index)].index).T
@@ -292,8 +313,8 @@ def newcurve(df, mapping, ax=None):
     #sns.scatterplot(data=plotdf.sort_values(0), x='Days after birth', y=0, s=10, linewidth=0, ax=ax)
     return ax
 
-
-def dendrogram(df):
+def dendrogram(subject, **kwargs):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     from scipy.cluster.hierarchy import linkage, dendrogram
     import matplotlib.pyplot as plt
     distance_matrix = np.array([[0, 1, 2, 3],
@@ -308,42 +329,17 @@ def dendrogram(df):
     plt.title('Dendrogram')
     return ax
 
-def upset(dfdict):
-    from upsetplot import UpSet, from_contents
+def upset(subject, dfdict=None):
+    # Need to fix
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     intersections = from_contents(dfdict) 
     upset = UpSet(intersections)
     upset.plot()
+    return upset
 
-def changeplot(subject, fcthresh=1, pvalthresh=0.0000000005):
-    import pandas as pd
-    changes = pd.read_csv(f'../results/{subject}changes.csv', index_col=0)
-    data = pd.read_csv(f'../results/{subject}.csv', index_col=[0,1])
-    f.setupplot()
-    increase = changes.loc[
-            (changes['MWW_q-value'].lt(pvalthresh)) & (changes[changes.columns[changes.columns.str.contains('Log2')]].gt(0).iloc[:,0])
-            , 'MWW_q-value'].index
-    order = data[increase].groupby(level=1).median().iloc[0].sort_values(ascending=False).index
-    plotdf = data[order].stack().to_frame('Value').reset_index()
-    fig, ax = plt.subplots(figsize=(len(increase),2))
-    f.box(data=plotdf, x='level_2', y='Value', hue='ARM', ax=ax)
-    [ax.axvline(x+.5,color='k') for x in ax.get_xticks()]
-    plt.savefig(f'../results/{subject}decreasechangeplot.svg')
-    plt.show()
-    decrease = changes.loc[
-            (changes['MWW_q-value'].lt(pvalthresh)) & (changes[changes.columns[changes.columns.str.contains('Log2')]].lt(0).iloc[:,0])
-            , 'MWW_q-value'].index
-    order = data[decrease].groupby(level=1).median().iloc[0].sort_values(ascending=False).index
-    plotdf = data[order].stack().to_frame('Value').reset_index()
-    fig, ax = plt.subplots(figsize=(len(decrease),2))
-    f.box(data=plotdf, x='level_2', y='Value', hue='ARM', ax=ax)
-    [ax.axvline(x+.5,color='k') for x in ax.get_xticks()]
-    plt.savefig(f'../results/{subject}decreasechangeplot.svg')
-    plt.show()
-
-def networkplot(G, group=None):
-    import matplotlib.pyplot as plt
-    from itertools import count
-    import networkx as nx
+def networkplot(subject, group=None):
+    # Need to fix
+    G = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     if group:
         nx.set_node_attributes(G, group, "group")
         groups = set(nx.get_node_attributes(G, 'group').values())
@@ -359,26 +355,65 @@ def networkplot(G, group=None):
     plt.colorbar(ax)
     return ax
 
-def venn(df1, df2, df3):
-    from matplotlib_venn import venn3
-    from itertools import combinations
+def venn(subject, df1=None, df2=None, df3=None, **kwargs):
+    # Untested
+    DF1 = pd.read_csv(f'../results/{df1}.tsv', sep='\t', index_col=0)
+    DF2 = pd.read_csv(f'../results/{df2}.tsv', sep='\t', index_col=0)
+    DF3 = pd.read_csv(f'../results/{df3}.tsv', sep='\t', index_col=0)
     def combs(x): return [c for i in range(1, len(x)+1) for c in combinations(x,i)]
-    comb = combs([df1, df2, df3])
+    comb = combs([DF1, DF2, DF3])
     result = []
     for i in comb:
         if len(i) > 1:
             result.append(len(set.intersection(*(set(j.columns) for j in i))))
         else:
             result.append(len(i[0].columns))
-    venn3(subsets = result)
+    ax = venn3(subsets = result)
+    return ax
+
+def plot(subject, plottype, **kwargs):
+    available={
+        'clustermap':clustermap,
+        'heatmap':heatmap,
+        'pointheatmap':pointheatmap,
+        'spindle':spindle,
+        'polar':polar,
+        'abund':abund,
+        'bar':bar,
+        'box':box,
+        'volcano':volcano,
+        'aucroc':aucroc,
+        'curve':curve,
+        'dendrogram':dendrogram,
+        'scatter':scatter,
+        'upset':upset,
+        'networkplot':networkplot,
+        'venn':venn
+        }
+    ax = available.get(plottype)(subject, **kwargs)
+    plt.savefig(f'../results/{subject}{plottype}.svg')
+    return ax
+
+'''
+def expvsobs
+    plt.scatter(y_test, y_pred, alpha=0.5, color='darkblue', marker='o')
+    plt.plot([min(y_test), max(y_test)], [min(y_test), max(y_test)], '--', color='gray', linewidth=2)
+    for i in range(len(y_test)):
+        plt.plot([y_test[i], y_test[i]], [y_test[i], y_pred[i]], color='red', alpha=0.5)
+    plt.xlabel('Actual Values')
+    plt.ylabel('Predicted Values')
+    plt.title('Random Forest Regression Model')
+    plt.savefig('../results/expvsobs.svg')
+    plt.show()
+'''
 
 if __name__ == '__main__':
     setupplot()
     parser = argparse.ArgumentParser(description='Plot - Produces a plot of a given dataset')
+    parser.add_argument('plottype')
     parser.add_argument('subject')
-    parser.add_argument('-m', '--mult')
-    parser.add_argument('-p', '--perm')
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
     args = {k: v for k, v in vars(args).items() if v is not None}
-    output = change(**args)
-    print(*output)
+    kwargs = eval(unknown[0]) if unknown != [] else {}
+    output = plot(**args|kwargs)
+    plt.show()

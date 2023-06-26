@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 from scipy.spatial import distance
@@ -8,22 +8,23 @@ import numpy as np
 import pandas as pd
 import skbio
 
-def varianceexplained(df, pval=True):
-    Ar_dist = distance.squareform(distance.pdist(df, metric="braycurtis"))
-    DM_dist = skbio.stats.distance.DistanceMatrix(Ar_dist)
-    result = permanova(DM_dist, df.index)
-    if pval:
-        return result['p-value']
-    else:
-        return result['test statistic']
-
-def variance(subject, pval=True):
-    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
-    meta = pd.read_csv("../results/meta.tsv", sep='\t' ,index_col=0)
-    target = meta.columns[0]
+def variance(df1, df2, pval=True):
+    # how does df1 explain variance in df2 where df2 is meta (only categories)
+    # should rework this one to include in calculate but hard
+    def varianceexplained(df, pval=True):
+        Ar_dist = distance.squareform(distance.pdist(df, metric="braycurtis"))
+        DM_dist = skbio.stats.distance.DistanceMatrix(Ar_dist)
+        result = permanova(DM_dist, df.index)
+        if pval:
+            return result['p-value']
+        else:
+            return result['test statistic']
+    DF1 = pd.read_csv(f'../results/{df1}.tsv', sep='\t', index_col=0)
+    DF2 = pd.read_csv(f'../results/{df2}.tsv', sep='\t', index_col=0)
+    target = DF2.columns[0]
     output = pd.Series()
-    for target in meta.columns:
-        tdf = df.join(meta[target].fillna('missing')).set_index(target)
+    for target in DF2.columns:
+        tdf = DF1.join(DF2[target].fillna('missing')).set_index(target)
         if all(tdf.index.value_counts().lt(20)):
             next
         tdf = tdf.loc[tdf.index.value_counts().gt(10)]

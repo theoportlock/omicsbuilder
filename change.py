@@ -1,5 +1,6 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
 from itertools import combinations
 from itertools import permutations
 from scipy.stats import levene
@@ -70,14 +71,14 @@ def change(subject, mult=False, perm=False):
     pval = sig(df, mult=mult, perm=perm)
     pval.columns = pval.columns.str.join('/')
     fc = fc.set_axis(['Log2(' + fc.columns[0] + ')'], axis=1)
-    pval = pval.set_axis(['MWW_q-value'], axis=1)
+    pval = pval.set_axis(['sig'], axis=1)
     basemean = df.mean().to_frame('basemean')
     means = df.groupby(level=0).mean().T
     means.columns = means.columns + '_Mean'
     baseprevail = df.agg(np.count_nonzero, axis=0).div(df.shape[0]).to_frame('baseprevail')
     prevail = df.groupby(level=0, axis=0).apply(lambda x: x.agg(np.count_nonzero, axis=0).div(x.shape[0])).T
     prevail.columns = prevail.columns + '_Prev'
-    output = pd.concat([basemean,means,baseprevail,prevail,fc,pval], join='inner', axis=1).sort_values('MWW_q-value')
+    output = pd.concat([basemean,means,baseprevail,prevail,fc,pval], join='inner', axis=1).sort_values('sig')
     output.to_csv(f'../results/{subject}change.tsv', sep='\t')
     return output
 
@@ -89,4 +90,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args = {k: v for k, v in vars(args).items() if v is not None}
     output = change(**args)
-    print(*output)
+    print(output)

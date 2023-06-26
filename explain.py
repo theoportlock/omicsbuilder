@@ -1,13 +1,17 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 from scipy.stats import spearmanr
 import argparse
+import pickle
 import numpy as np
 import pandas as pd
 import shap
 
-def SHAP_interact(X, model):
+def SHAP_interact(subject):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
+    X = df
+    with open(f'../results/{subject}predict.pkl', 'rb') as file: model = pickle.load(file)
     explainer = shap.TreeExplainer(model)
     inter_shaps_values = explainer.shap_interaction_values(X)
     vals = inter_shaps_values[0]
@@ -16,8 +20,11 @@ def SHAP_interact(X, model):
     final = pd.DataFrame(vals[0], index=X.columns, columns=X.columns)
     return final
 
-def SHAP_bin(X, model):
-    explainer = shap.TreeExplainer(model)
+def SHAP_bin(subject):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
+    X = df
+    with open(f'../results/{subject}predict.pkl', 'rb') as file: model = pickle.load(file)
+    explainer = shap.Explainer(model)
     shaps_values = explainer(X)
     meanabsshap = pd.Series(
         np.abs(shaps_values.values[:, :, 0]).mean(axis=0),
@@ -28,15 +35,20 @@ def SHAP_bin(X, model):
     final.fillna(0, inplace=True)
     return final
 
-def explain(X,model):
-    return None
+def explain(analysis, subject, **kwargs):
+    available={
+        'SHAP_bin':SHAP_bin,
+        'SHAP_interact':SHAP_interact
+        }
+    df = available.get(analysis)(subject, **kwargs)
+    return df
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Explain - Explains the machine learning models')
+    parser = argparse.ArgumentParser(description='Explain - compute a SHAP value for each sample based on features in AI model')
+    parser.add_argument('analysis')
     parser.add_argument('subject')
-    parser.add_argument('-m', '--mult')
-    parser.add_argument('-p', '--perm')
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
     args = {k: v for k, v in vars(args).items() if v is not None}
-    output = explain(**args)
-    print(*output)
+    kwargs = eval(unknown[0]) if unknown != [] else {}
+    output = explain(**args|kwargs)
+    print(output)
