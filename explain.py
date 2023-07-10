@@ -10,7 +10,7 @@ import shap
 
 def SHAP_interact(subject):
     df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
-    X = df
+    X = df.copy()
     with open(f'../results/{subject}predict.pkl', 'rb') as file: model = pickle.load(file)
     explainer = shap.TreeExplainer(model)
     inter_shaps_values = explainer.shap_interaction_values(X)
@@ -18,13 +18,16 @@ def SHAP_interact(subject):
     for i in range(1, vals.shape[0]):
         vals[0] += vals[i]
     final = pd.DataFrame(vals[0], index=X.columns, columns=X.columns)
+    final = final.stack().sort_values().to_frame('SHAP_interaction')
+    final.index = final.index.set_names(['source', 'target'], level=[0,1])
+    final.to_csv(f'../results/{subject}shapinteract.tsv', sep='\t')
     return final
 
 def SHAP_bin(subject):
     df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
-    X = df
+    X = df.copy()
     with open(f'../results/{subject}predict.pkl', 'rb') as file: model = pickle.load(file)
-    explainer = shap.Explainer(model)
+    explainer = shap.TreeExplainer(model)
     shaps_values = explainer(X)
     meanabsshap = pd.Series(
         np.abs(shaps_values.values[:, :, 0]).mean(axis=0),
@@ -33,6 +36,8 @@ def SHAP_bin(subject):
     corrs = [spearmanr(shaps_values.values[:, x, 1], X.iloc[:, x])[0] for x in range(len(X.columns))]
     final = meanabsshap * np.sign(corrs)
     final.fillna(0, inplace=True)
+    final = final.sort_values()
+    final.to_frame('Shap_Value').to_csv(f'../results/{subject}shaps.tsv', sep='\t')
     return final
 
 def explain(analysis, subject, **kwargs):

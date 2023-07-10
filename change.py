@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+# Add LEFSE and make so that you can add options to argparse list for the report with default being lfc sig and prev
+
 from itertools import combinations
 from itertools import permutations
 from scipy.stats import levene
@@ -64,13 +66,14 @@ def lfc(df, mult=False, perm=False):
     return outdf
 
 def change(subject, mult=False, perm=False):
-    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0).sort_index()
     fc = lfc(df, mult=mult, perm=perm)
     fc.columns = fc.columns.str.join('/')
     fc = fc.replace([np.inf, -np.inf], np.nan)
     pval = sig(df, mult=mult, perm=perm)
     pval.columns = pval.columns.str.join('/')
     fc = fc.set_axis(['Log2(' + fc.columns[0] + ')'], axis=1)
+    #fc = fc.set_axis(['lfc'], axis=1)
     pval = pval.set_axis(['sig'], axis=1)
     basemean = df.mean().to_frame('basemean')
     means = df.groupby(level=0).mean().T
@@ -85,8 +88,8 @@ def change(subject, mult=False, perm=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Change - Produces a report of the significant feature changes')
     parser.add_argument('subject')
-    parser.add_argument('-m', '--mult')
-    parser.add_argument('-p', '--perm')
+    parser.add_argument('-m', '--mult', action='store_true')
+    parser.add_argument('-p', '--perm', action='store_true')
     args = parser.parse_args()
     args = {k: v for k, v in vars(args).items() if v is not None}
     output = change(**args)

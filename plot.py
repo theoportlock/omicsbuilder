@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+# Make multibox for species abundance
+
 from itertools import combinations
 from itertools import count
 from matplotlib.patches import Ellipse
@@ -201,10 +203,18 @@ def bar(subject, **kwargs):
     plt.setp(kwargs['ax'].get_xticklabels(), rotation=45, ha="right")
     return kwargs['ax']
 
-def scatter(subject, **kwargs):
+def hist(subject, **kwargs):
     df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     kwargs['ax'] = plt.subplots()[1] if not kwargs.get('ax') else kwargs.get('ax')
-    sns.lmplot(data=df, x=kwargs.get('x'), y=kwargs.get('y'))
+    kwargs['col'] = 'sig' if not kwargs.get('col') else kwargs.get('col')
+    kwargs['ax'] = sns.histplot(data=df[kwargs['col']])
+    plt.setp(kwargs['ax'].get_xticklabels(), rotation=45, ha="right")
+    return kwargs['ax']
+
+def scatter(subject, **kwargs):
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
+    #kwargs['ax'] = plt.subplots()[1] if not kwargs.get('ax') else kwargs.get('ax')
+    sns.regplot(data=df, x=kwargs.get('x'), y=kwargs.get('y'), ax=kwargs.get('ax'))
     return kwargs['ax']
 
 def box(subject, **kwargs):
@@ -236,6 +246,30 @@ def box(subject, **kwargs):
             text_format='star',
             verbose=0,
         )
+    return kwargs['ax']
+
+def multibox(subject, **kwargs):
+    # takes a filtered abundance table by 
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t')
+    if not kwargs.get('x'): kwargs['x'] = df.columns[0]
+    if not kwargs.get('y'): kwargs['y'] = df.columns[1]
+    if not kwargs.get('ax'): kwargs['ax'] = plt.subplots()[1]
+    if len(speciessig) > 1:
+        fig, ax = plt.subplots(nrows=1, ncols=len(speciessig), figsize=(5.5,5), sharey=True)
+        i, j = 0, speciessig[0]
+        for i, j in enumerate(speciessig):
+            stats = sig.loc[speciessig]
+            kwargs = {
+                    'data':df[j].to_frame(),
+                    'x':df[j].index,
+                    'y':j,
+                    'palette':colours,
+                    's':1,
+                    'ax':ax[i]
+                    }
+            box(**kwargs)
+        plt.tight_layout()
+        plt.savefig(f'../results/individ{subject}Box.svg')
     return kwargs['ax']
 
 def volcano(subject, lfccol='lfc', sigcol='sig', fcthresh=1, pvalthresh=0.05, annot=False, ax=None, **kwargs):
@@ -314,6 +348,7 @@ def curve(subject, mapping=None, ax=None, **kwargs):
     return ax
 
 def dendrogram(subject, **kwargs):
+    # need to fix
     df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     from scipy.cluster.hierarchy import linkage, dendrogram
     import matplotlib.pyplot as plt
@@ -371,7 +406,7 @@ def venn(subject, df1=None, df2=None, df3=None, **kwargs):
     ax = venn3(subsets = result)
     return ax
 
-def plot(subject, plottype, **kwargs):
+def plot(subject, plottype, logx=False, logy=False, **kwargs):
     available={
         'clustermap':clustermap,
         'heatmap':heatmap,
@@ -380,6 +415,7 @@ def plot(subject, plottype, **kwargs):
         'polar':polar,
         'abund':abund,
         'bar':bar,
+        'hist':hist,
         'box':box,
         'volcano':volcano,
         'aucroc':aucroc,
@@ -390,7 +426,14 @@ def plot(subject, plottype, **kwargs):
         'networkplot':networkplot,
         'venn':venn
         }
+    if not kwargs.get('figsize'): kwargs['figsize'] = (3,3)
+    if not kwargs.get('ax'): kwargs['ax'] = plt.subplots(figsize=kwargs.get('figsize'))[1]
+    kwargs.pop('figsize')
     ax = available.get(plottype)(subject, **kwargs)
+    if logx:
+        plt.xscale('log')
+    if logy:
+        plt.yscale('log')
     plt.savefig(f'../results/{subject}{plottype}.svg')
     return ax
 
@@ -412,6 +455,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Plot - Produces a plot of a given dataset')
     parser.add_argument('plottype')
     parser.add_argument('subject')
+    parser.add_argument('--logx', action='store_true')
+    parser.add_argument('--logy', action='store_true')
     args, unknown = parser.parse_known_args()
     args = {k: v for k, v in vars(args).items() if v is not None}
     kwargs = eval(unknown[0]) if unknown != [] else {}

@@ -7,6 +7,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.preprocessing import StandardScaler
 import argparse
 import pandas as pd
+import numpy as np
 
 def norm(df):
     return df.T.div(df.sum(axis=1), axis=1).T
