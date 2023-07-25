@@ -36,7 +36,7 @@ def setupplot():
     matplotlib.rcParams['font.family'] = 'Arial'
     matplotlib.rcParams['axes.axisbelow'] = True
 
-def clustermap(subject, sig=None, figsize=(4,4), corr=False,  **kwargs):
+def clustermap(subject, sig=None, figsize=(4,4), corr=False, **kwargs):
     if not sig is None:
         sig = pd.read_csv(f'../results/{sig}.tsv', sep='\t', index_col=0)
     if corr:
