@@ -5,8 +5,11 @@
 
 from itertools import combinations
 from itertools import count
+import pickle
 from matplotlib.patches import Ellipse
 from matplotlib_venn import venn3
+from sklearn.metrics import auc
+from sklearn.metrics import roc_curve
 from upsetplot import UpSet, from_contents
 import argparse
 import matplotlib
@@ -180,6 +183,32 @@ def polar(subject, **kwargs):
     ax.grid(True)
     return ax
 
+def circos(subject, **kwargs):
+    edges = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
+    varcol = kwargs.get('varcol')
+    col = pd.read_csv(f'../results/{varcol}.csv', index_col=0).rename_axis('source')
+    for i, element in col.groupby('datatype', sort=False):
+        col.loc[element.index,'ID'] = element.reset_index().reset_index().set_index('source')['index'].astype(int)
+    col['ID'] = col.ID.astype('int')
+    data = edges.join(col[['ID','datatype']], how='inner').rename(columns={'datatype':'datatype1', 'ID':'index1'})
+    data = data.reset_index().set_index('target').join(col[['ID','datatype']], how='inner').rename_axis('target').rename(columns={'datatype':'datatype2', 'ID':'index2'}).reset_index()
+    # remove internal correlations
+    data = data.loc[data.datatype1 != data.datatype2]
+    Gcircle = pycircos.Gcircle
+    Garc = pycircos.Garc
+    circle = Gcircle()
+    for i, row in col.groupby('datatype', sort=False):
+        arc = Garc(arc_id=i,
+                   size=row['ID'].max(),
+                   interspace=30,
+                   label_visible=True)
+        circle.add_garc(arc)
+    circle.set_garcs()
+    for i, row in data.iterrows():
+        circle.chord_plot(start_list=(row.datatype1, row.index1-1, row.index1, 500), end_list=(row.datatype2, row.index2-1, row.index2, 500),
+        facecolor=plt.cm.get_cmap('coolwarm')(row.weight)) 
+    return circle
+
 def abund(subject, **kwargs):
     df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     kwargs['ax'] = plt.subplots()[1] if not kwargs.get('ax') else kwargs.get('ax')
@@ -250,65 +279,57 @@ def box(subject, **kwargs):
 
 def multibox(subject, **kwargs):
     # takes a filtered abundance table by 
-    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t')
-    if not kwargs.get('x'): kwargs['x'] = df.columns[0]
-    if not kwargs.get('y'): kwargs['y'] = df.columns[1]
-    if not kwargs.get('ax'): kwargs['ax'] = plt.subplots()[1]
-    if len(speciessig) > 1:
-        fig, ax = plt.subplots(nrows=1, ncols=len(speciessig), figsize=(5.5,5), sharey=True)
-        i, j = 0, speciessig[0]
-        for i, j in enumerate(speciessig):
-            stats = sig.loc[speciessig]
-            kwargs = {
-                    'data':df[j].to_frame(),
-                    'x':df[j].index,
-                    'y':j,
-                    'palette':colours,
-                    's':1,
-                    'ax':ax[i]
-                    }
-            box(**kwargs)
-        plt.tight_layout()
-        plt.savefig(f'../results/individ{subject}Box.svg')
-    return kwargs['ax']
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
+    if not kwargs.get('figsize'): kwargs['figsize'] = (6,5)
+    fig, ax = plt.subplots(nrows=1, ncols=len(df.columns), figsize=kwargs.get('figsize'), sharey=True)
+    i, j = 0, df.columns[0]
+    for i, j in enumerate(df.columns):
+        #stats = sig.loc[speciessig]
+        boxkwargs = {
+                'data':df[j].to_frame(),
+                'x':df[j].index,
+                'y':j,
+                #'palette':kwargs.get(colours),
+                'ax':ax[i]
+                }
+        sns.boxplot(showfliers=False, showcaps=False, **boxkwargs)
+        sns.stripplot(s=2, color="0.2", **boxkwargs)
+        plt.setp(ax[i].get_xticklabels(), rotation=40, ha="right")
+    return ax
 
-def volcano(subject, lfccol='lfc', sigcol='sig', fcthresh=1, pvalthresh=0.05, annot=False, ax=None, **kwargs):
+def volcano(subject, change='lfc', sig='sig', fc=1, pval=0.05, annot=False, ax=None, **kwargs):
     df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     if not ax: fig, ax= plt.subplots()
-    lfc = df[lfccol]
-    pval = df[sigcol] 
-    lpval = pval.apply(np.log10).mul(-1)
-    ax.scatter(lfc, lpval, c='black', s=0.5)
+    lfc = df[change]
+    pvals = df[sig] 
+    lpvals = pvals.apply(np.log10).mul(-1)
+    ax.scatter(lfc, lpvals, c='black', s=0.5)
     ax.axvline(0, color='gray', linestyle='--')
-    ax.axhline(-1 * np.log10(pvalthresh), color='red', linestyle='-')
+    ax.axhline(-1 * np.log10(pval), color='red', linestyle='-')
     ax.axhline(0, color='gray', linestyle='--')
-    ax.axvline(fcthresh, color='red', linestyle='-')
-    ax.axvline(-fcthresh, color='red', linestyle='-')
+    ax.axvline(fc, color='red', linestyle='-')
+    ax.axvline(-fc, color='red', linestyle='-')
     ax.set_ylabel('-log10 q-value')
     ax.set_xlabel('log2 fold change')
     ax.set_ylim(ymin=-0.1)
     x_max = np.abs(ax.get_xlim()).max()
     ax.set_xlim(xmin=-x_max, xmax=x_max)
-    sigspecies = lfc.abs().gt(fcthresh) & lpval.abs().gt(-1 * np.log10(pvalthresh))
-    sig = pd.concat([lfc.loc[sigspecies], lpval.loc[sigspecies]], axis=1) 
+    sigspecies = lfc.abs().gt(fc) & lpvals.abs().gt(-1 * np.log10(pval))
+    sig = pd.concat([lfc.loc[sigspecies], lpvals.loc[sigspecies]], axis=1) 
     sig.columns=['x','y']
     if annot: [ax.text(sig.loc[i,'x'], sig.loc[i,'y'], s=i) for i in sig.index]
     return ax
 
-def aucroc(subject, X, y, ax=None, colour=None, **kwargs):
+def aucroc(subject, ax=None, colour=None, **kwargs):
     # Need to sort this so model is the pickle
-    model = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
-    from sklearn.metrics import auc
-    from sklearn.metrics import roc_curve
-    import matplotlib.pyplot as plt
+    #subject, ax, colour = 'metabARMaucroc',None,None
+    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
+    AUC = auc(df.fpr, df.tpr)
     if ax is None: fig, ax= plt.subplots()
-    y_score = model.predict_proba(X)[:,1]
-    fpr, tpr, _ = roc_curve(y_test, y_score)
-    AUC = auc(fpr, tpr)
     if colour is None:
-        ax.plot(fpr, tpr, label=r"AUCROC = %0.2f" % AUC )
+        ax.plot(df.fpr, df.tpr, label=r"AUCROC = %0.2f" % AUC )
     else:
-        ax.plot(fpr, tpr, color=colour, label=r"AUCROC = %0.2f" % AUC )
+        ax.plot(df.fpr, df.tpr, color=colour, label=r"AUCROC = %0.2f" % AUC )
     ax.plot([0, 1], [0, 1],'r--')
     plt.xlim([-0.01, 1.01])
     plt.ylim([-0.01, 1.01])
@@ -390,7 +411,20 @@ def networkplot(subject, group=None):
     plt.colorbar(ax)
     return ax
 
-def venn(subject, df1=None, df2=None, df3=None, **kwargs):
+def lefsebar(subject, **kwargs):
+    os.system(f'lefse_plot_res.py ../results/{subject}LEFSE_scores.txt ../results/{subject}LEFSE_features.pdf --format pdf')
+    return None
+
+def lefseclad(subject, **kwargs):
+    os.system(f'lefse_plot_cladogram.py ../results/{subject}LEFSE_scores.txt ../results/{subject}LEFSE_clad.pdf --format pdf')
+    return None
+
+def lefsefeat(subject, **kwargs):
+    os.system(f'mkdir ../results/{subject}_biomarkers_raw_images')
+    os.system(f'lefse_plot_features.py ../results/{subject}LEFSE_format.txt ../results/{subject}LEFSE_scores.txt ../results/{subject}_biomarkers_raw_images/ --format svg')
+    return None
+
+def venn(subject, **kwargs):
     # Untested
     DF1 = pd.read_csv(f'../results/{df1}.tsv', sep='\t', index_col=0)
     DF2 = pd.read_csv(f'../results/{df2}.tsv', sep='\t', index_col=0)
@@ -419,6 +453,9 @@ def plot(subject, plottype, logx=False, logy=False, **kwargs):
         'box':box,
         'volcano':volcano,
         'aucroc':aucroc,
+        'lefsebar':lefsebar,
+        'lefseclad':lefseclad,
+        'lefsefeat':lefsefeat,
         'curve':curve,
         'dendrogram':dendrogram,
         'scatter':scatter,

@@ -21,11 +21,15 @@ def classifier(subject):
     X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=1)
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1]
     performance = classification_report(y_true=y_test, y_pred=y_pred) + '\n' \
-        'AUCROC=' + str(roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])) + '\n\n' +\
+        'AUCROC=' + str(roc_auc_score(y_test, y_prob)) + '\n\n' +\
         pd.DataFrame(confusion_matrix(y_test, y_pred)).to_string() + '\n' +\
         'oob score=' + str(model.oob_score_)
     print(performance)
+    fpr, tpr, _ = roc_curve(y_test, y_prob, pos_label=y_test[0])
+    aucrocdata = pd.DataFrame(pd.concat([pd.Series(fpr), pd.Series(tpr)],axis=1)).set_axis(['fpr','tpr'], axis=1)
+    aucrocdata.to_csv(f'../results/{subject}aucroc.tsv', sep='\t')
     with open(f'../results/{subject}performance.txt', 'w') as of: of.write(performance)
     return model
 

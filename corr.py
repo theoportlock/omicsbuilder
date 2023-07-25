@@ -6,6 +6,14 @@ from statsmodels.stats.multitest import fdrcorrection
 import argparse
 import pandas as pd
 
+def sparcc(subject):
+    ncor = pd.read_csv('/home/theop/SparCC/sparcc_output/cor_sparcc_tapetes.csv', index_col=0)
+    ncor.index, ncor.columns = cor.index, cor.columns
+    thresh = 0.03
+    edges = f.to_edges(ncor, thresh=thresh)
+    edges.sort_values('weight').to_csv('../results/edges.csv')
+    return edges
+
 def corr(subject, mult=True):
     def to_edges(df):
         df = df.rename_axis('source', axis=0).rename_axis("target", axis=1)
