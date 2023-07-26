@@ -2,28 +2,22 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-import pandas as pd
+import functions as f
 
-def merge(datasets=None, type='inner', append=None, filename=None):
-    if append:
-        outdf = pd.concat([pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0) for subject in datasets], axis=0, join=type)
-    else:
-        outdf = pd.concat([pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0) for subject in datasets], axis=1, join=type)
-    if filename:
-        outdf.to_csv(f'../results/{filename}.tsv', sep='\t')
-    else:
-        outdf.to_csv(f'../results/{"".join(datasets)}.tsv', sep='\t')
-    return outdf
+parser = argparse.ArgumentParser(description='Merge - Combines datasets')
+parser.add_argument('datasets', nargs='+')
+parser.add_argument('-t', '--type')
+parser.add_argument('-a', '--append', action='store_true')
+parser.add_argument('-f', '--filename')
+known, unknown = parser.parse_known_args()
+known = {k: v for k, v in vars(args).items() if v is not None}
+unknown = eval(unknown[0]) if unknown != [] else {}
 
+dfs = known.get("datasets"):
+output = f.merge(dfs, **known|unknown)
+print(output.to_string())
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Merge - Combines datasets')
-    parser.add_argument('datasets', nargs='+')
-    parser.add_argument('-t', '--type')
-    parser.add_argument('-a', '--append', action='store_true')
-    parser.add_argument('-f', '--filename')
-    args = parser.parse_args()
-    args = {k: v for k, v in vars(args).items() if v is not None}
-    print(args)
-    output = merge(**args)
-    print(output)
+if known.get("filename"):
+    outdf.to_csv(f'../results/{filename}.tsv', sep='\t')
+else:
+    outdf.to_csv(f'../results/{"".join(dfs)}.tsv', sep='\t')

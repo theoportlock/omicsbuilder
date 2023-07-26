@@ -1,28 +1,24 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import pandas as pd
+
 import argparse
+import functions as f
 
-def splitter(subject, column, df2='meta'):
-    '''
-    If no arguments given then just stratify by all metadata
-    '''
-    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
-    meta = pd.read_csv(f"../results/{df2}.tsv", sep='\t' ,index_col=0)
-    metadf = []
-    for level in meta[column].unique():
-        merge = df.join(meta.loc[meta[column] == level,column], how='inner').drop(column, axis=1)
-        metadf.append(merge)
-        merge.to_csv(f'../results/{subject}{column}{level}.tsv', sep='\t')
-    return metadf
+parser = argparse.ArgumentParser(description='Change - Produces a report of the significant feature changes')
+parser.add_argument('subject')
+parser.add_argument('column')
+parser.add_argument('--df2', required=False)
+known, unknown = parser.parse_known_args()
+known = {k: v for k, v in vars(args).items() if v is not None}
+unknown = eval(unknown[0]) if unknown != [] else {}
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Change - Produces a report of the significant feature changes')
-    parser.add_argument('subject')
-    parser.add_argument('column')
-    parser.add_argument('--df2', required=False)
-    args = parser.parse_args()
-    args = {k: v for k, v in vars(args).items() if v is not None}
-    output = splitter(**args)
-    print(output)
-
+# need to sort this out for the output
+df = pd.read_csv(f'../results/{known.get("subject")}.tsv', sep='\t', index_col=0)
+if known.get("df2"):
+    df2 = pd.read_csv(f'../results/{known.get("df2")}.tsv', sep='\t' ,index_col=0)
+else
+    df2 = pd.read_csv(f'../results/meta.tsv', sep='\t' ,index_col=0)
+output = f.splitter(df, df2, **known|unknown)
+print(output.to_string())
+for col in output.columns:
+    output[col].to_csv(f'../results/{subject}{col}{level}.tsv', sep='\t')
