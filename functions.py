@@ -37,6 +37,14 @@ import subprocess
 import sys
 import umap
 
+# Load
+def load(subject):
+    return pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
+
+# Save
+def save(df, subject):
+    df.to_csv(f'../results/{subject}.tsv', sep='\t')
+
 # Prediction
 def classifier(df, **kwargs):
     model = RandomForestClassifier(n_jobs=-1, random_state=1, oob_score=True)
@@ -255,9 +263,11 @@ def circos(df, **kwargs):
         facecolor=plt.cm.get_cmap('coolwarm')(row.weight)) 
     return circle
 
-def abund(subject, **kwargs):
-    df = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
+def abund(df, **kwargs):
     kwargs['ax'] = plt.subplots()[1] if not kwargs.get('ax') else kwargs.get('ax')
+    if df.columns.shape[0] > 20:
+        df['others'] = df[df.mean().sort_values(ascending=False).iloc[21:].index].sum(axis=1)
+    df = df.loc[:, df.mean().sort_values(ascending=False).iloc[:20].index]
     df.plot(kind='bar', stacked=True, width=0.9, cmap='tab20', **kwargs)
     plt.legend(bbox_to_anchor=(1.001, 1), loc='upper left', fontsize='small')
     plt.ylabel('Relative abundance')
@@ -290,6 +300,7 @@ def scatter(df, **kwargs):
     return kwargs['ax']
 
 def box(df, **kwargs):
+    df = df.reset_index()
     if not kwargs.get('x'): kwargs['x'] = df.columns[0]
     if not kwargs.get('y'): kwargs['y'] = df.columns[1]
     if not kwargs.get('ax'): kwargs['ax'] = plt.subplots()[1]
@@ -466,7 +477,7 @@ def expvsobs(df, **kwargs):
     plt.title('Random Forest Regression Model')
     return None
 
-def plot(df, plottype, logx=False, logy=False, **kwargs):
+def plot(plottype, df, logx=False, logy=False, **kwargs):
     available={
         'clustermap':clustermap,
         'heatmap':heatmap,
@@ -483,13 +494,15 @@ def plot(df, plottype, logx=False, logy=False, **kwargs):
         'lefseclad':lefseclad,
         'lefsefeat':lefsefeat,
         'curve':curve,
+        'multibox':multibox,
         'dendrogram':dendrogram,
         'scatter':scatter,
         'upset':upset,
         'networkplot':networkplot,
-        'venn':venn
+        'venn':venn,
         'expvsobs':expvsobs
         }
+    setupplot()
     if not kwargs.get('figsize'): kwargs['figsize'] = (3,3)
     if not kwargs.get('ax'): kwargs['ax'] = plt.subplots(figsize=kwargs.get('figsize'))[1]
     kwargs.pop('figsize')
@@ -508,11 +521,11 @@ def merge(datasets=None, type='inner', append=None, filename=None):
 
 # Filter 
 def filter(df, min_unique=None, gt=None, lt=None, column=None, filter_df=None, filter_df_axis=0, absgt=None, rowfilt=None, colfilt=None):
-    if filter_df:
+    if filter_df is not None:
         if filter_df_axis == 1:
-            df = df.loc[:, fdf.index]
+            df = df.loc[:, filter_df.index]
         else:
-            df = df.loc[fdf.index]
+            df = df.loc[filter_df.index]
     if colfilt:
         df = df.loc[:, df.columns.str.contains(colfilt, regex=True)]
     if rowfilt:
@@ -619,6 +632,23 @@ def describe(df, pval=0.05, corr=None, change=None, sig=None, **kwargs):
     return summary
 
 # Corr
+def corrpair(df1, df2, FDR=True, min_unique=10):
+    df1 = df1.loc[:, df1.nunique() > min_unique]
+    df2 = df2.loc[:, df2.nunique() > min_unique]
+    df = df1.join(df2, how='inner')
+    cor, pval = spearmanr(df)
+    cordf = pd.DataFrame(cor, index=df.columns, columns=df.columns)
+    pvaldf = pd.DataFrame(pval, index=df.columns, columns=df.columns)
+    cordf = cordf.loc[df1.columns, df2.columns]
+    pvaldf = pvaldf.loc[df1.columns, df2.columns]
+    pvaldf.fillna(1, inplace=True)
+    if FDR:
+        pvaldf = pd.DataFrame(
+            fdrcorrection(pvaldf.values.flatten())[1].reshape(pvaldf.shape),
+            index = pvaldf.index,
+            columns = pvaldf.columns)
+    return cordf, pvaldf
+
 def sparcc(subject):
     ncor = pd.read_csv('/home/theop/SparCC/sparcc_output/cor_sparcc_tapetes.csv', index_col=0)
     ncor.index, ncor.columns = cor.index, cor.columns
@@ -671,16 +701,13 @@ def ANCOM(df, **kwargs):
             )
     return outdf
 
-def LEFSE(df, **kwargs):
+def LEFSE(df, subject, **kwargs):
     ndf = df.T
     ndf.index.name = 'class'
     ndf = ndf.T.reset_index().T
     ndf.to_csv(f'../results/{subject}LEFSE_data.txt', sep='\t')
-    #os.system(f'lefse_format_input.py ../results/{subject}LEFSE_data.txt ../results/{subject}LEFSE_format.txt -f r -c 2 -s -1 -u 1 -o 1000000')
-    #os.system(f'lefse_format_input.py ../results/{subject}.tsv ../results/{subject}LEFSE_format.txt -f c -u 1')
-    rs.system(f'lefse_format_input.py ../results/{subject}LEFSE_data.txt ../results/{subject}LEFSE_format.txt -f r -c 1 -u 1 -o 1000000')
+    os.system(f'lefse_format_input.py ../results/{subject}LEFSE_data.txt ../results/{subject}LEFSE_format.txt -f r -c 1 -u 1 -o 1000000')
     os.system(f'lefse_run.py ../results/{subject}LEFSE_format.txt ../results/{subject}LEFSE_scores.txt -l 2 --verbose 1')
-    return outdf
 
 def mww(df, **kwargs):
     df.index, df.columns = df.index.astype(str), df.columns.astype(str)
@@ -727,13 +754,22 @@ def prevail(df, **kwargs):
     output = pd.concat([basemean,means,baseprevail,prevail], join='inner', axis=1)
     return output
 
-def change(df, analysis, **kwargs):
+def std(df, **kwargs):
+    df.index, df.columns = df.index.astype(str), df.columns.astype(str)
+    basestd = df.std().to_frame('basestd')
+    stds = df.groupby(level=0).std().T
+    stds.columns = stds.columns + '_Std'
+    output = pd.concat([basestd,stds], join='inner', axis=1)
+    return output
+
+def change(df, analysis=['prevail','lfc','mww'], **kwargs):
+    df = df.sort_index()
     available={
         'prevail':prevail,
         'mww':mww,
         'lfc':lfc,
-        'lefse':LEFSE,
         'ancom':ANCOM,
+        'std':std,
         }
     output = []
     i = analysis[0]
@@ -869,7 +905,7 @@ def clr(df):
 def mult(df):
     return pd.DataFrame(mul(df), index=df.index, columns=df.columns)
 
-def scale(analysis, subject, **kwargs):
+def scale(analysis, df):
     available={
         'norm':norm,
         'standard':standard,
@@ -878,7 +914,7 @@ def scale(analysis, subject, **kwargs):
         'clr':clr,
         'mult':mult,
         }
-    output = available.get(analysis)(df, **kwargs)
+    output = available.get(analysis)(df)
     return output
 
 # Variance
@@ -915,7 +951,7 @@ def explainedvariance(df1, df2, pval=True, **kwargs):
     return power
 
 # Stratify
-def stratify(df, meta, level, **kwargs):
+def stratify(df, meta, level):
     metadf = df.join(meta[level].dropna(), how='inner').reset_index(drop=True).set_index(level)
     return metadf
 

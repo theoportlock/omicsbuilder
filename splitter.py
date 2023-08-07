@@ -3,13 +3,14 @@
 
 import argparse
 import functions as f
+import pandas as pd
 
 parser = argparse.ArgumentParser(description='Change - Produces a report of the significant feature changes')
 parser.add_argument('subject')
 parser.add_argument('column')
 parser.add_argument('--df2', required=False)
 known, unknown = parser.parse_known_args()
-known = {k: v for k, v in vars(args).items() if v is not None}
+known = {k: v for k, v in vars(known).items() if v is not None}
 unknown = eval(unknown[0]) if unknown != [] else {}
 
 # need to sort this out for the output
