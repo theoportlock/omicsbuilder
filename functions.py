@@ -48,7 +48,7 @@ def save(df, subject):
 # Prediction
 def classifier(df, **kwargs):
     model = RandomForestClassifier(n_jobs=-1, random_state=1, oob_score=True)
-    X, y = tdf, tdf.index
+    X, y = df, df.index
     X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=1)
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
@@ -63,9 +63,8 @@ def classifier(df, **kwargs):
     return model, performance, aucrocdata
 
 def regressor(df, **kwargs):
-    tdf = pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
     model = RandomForestRegressor(n_jobs=-1, random_state=1, oob_score=True)
-    X, y = tdf, tdf.index
+    X, y = df, df.index
     X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=1)
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
@@ -77,6 +76,33 @@ def regressor(df, **kwargs):
     print(performance)
     with open(f'../results/{subject}performance.txt', 'w') as of: of.write(performance)
     return model, performance
+
+def networkpredict(df):
+    i = df.columns[0]
+    shaps = pd.DataFrame(index=df.columns)
+    for i in df.columns:
+        tdf = df.set_index(i)
+        X,y = tdf, tdf.index
+        #X_train, X_test, y_train, y_test =  train_test_split(X,y)
+        model = RandomForestRegressor(random_state=1, n_jobs=-1)
+        #model.fit(X_train, y_train)
+        model.fit(X, y)
+        shaps[i] = SHAP_reg(df, model)
+        # careful running this as need to sort out pandas
+    edges = to_edges(shaps, thresh=0.01)
+    return edges
+
+def to_edges(df, thresh=0.5, directional=True):
+    import pandas as pd
+    df = df.rename_axis('source', axis=0).rename_axis("target", axis=1)
+    edges = df.stack().to_frame()[0]
+    nedges = edges.reset_index()
+    edges = nedges[nedges.target != nedges.source].set_index(['source','target']).drop_duplicates()[0]
+    if directional:
+        fin = edges.loc[(edges < 0.99) & (edges.abs() > thresh)].dropna().reset_index().rename(columns={'level_0': 'source', 'level_1':'target', 0:'weight'}).set_index('source').sort_values('weight')
+    else:
+        fin = edges.loc[(edges < 0.99) & (edges > thresh)].dropna().reset_index().rename(columns={'level_0': 'source', 'level_1':'target', 0:'weight'}).set_index('source').sort_values('weight')
+    return fin
 
 def predict(analysis, df, **kwargs):
     available={
@@ -576,6 +602,24 @@ def SHAP_bin(df, model, **kwargs):
     final = final.sort_values()
     return final
 
+def SHAP_reg(X, model):
+    import numpy as np
+    from scipy.stats import spearmanr
+    import pandas as pd
+    import shap
+    explainer = shap.TreeExplainer(model)
+    shaps_values = explainer(X)
+    meanabsshap = pd.Series(
+            np.abs(shaps_values.values).mean(axis=0),
+            index=X.columns
+            )
+    corrs = [spearmanr(shaps_values.values[:,x], X.iloc[:,x])[0] for x in range(len(X.columns))]
+    shaps = pd.DataFrame(shaps_values.values, columns=X.columns, index=X.index)
+    shaps = shaps.loc[:,shaps.sum() != 0]
+    final = meanabsshap * np.sign(corrs)
+    final.fillna(0, inplace=True)
+    return final
+
 def explain(analysis, subject, **kwargs):
     available={
         'SHAP_bin':SHAP_bin,
@@ -784,9 +828,9 @@ def diversity(df, **kwargs):
     def Evenness(df, axis=1): return df.agg(pielou_e, axis=axis)
     def Shannon(df, axis=1): return df.agg(shannon, axis=axis)
     diversity = pd.concat(
-            [Evenness(df).to_frame('Evenness'),
-             Richness(df).to_frame('Richness'),
-             Shannon(df).to_frame('Shannon')],
+            [Evenness(df.copy()).to_frame('Evenness'),
+             Richness(df.copy()).to_frame('Richness'),
+             Shannon(df.copy()).to_frame('Shannon')],
             axis=1).sort_index().sort_index(ascending=False)
     return diversity
 
@@ -822,12 +866,13 @@ def pca(df, **kwargs):
     return df[['PC1', 'PC2']]
 
 def pcoa(df, **kwargs):
-    Ar_dist = distance.squareform(distance.pdist(df, metric="braycurtis"))
+    ndf = df.copy()
+    Ar_dist = distance.squareform(distance.pdist(ndf, metric="braycurtis"))
     DM_dist = skbio.stats.distance.DistanceMatrix(Ar_dist)
     PCoA = skbio.stats.ordination.pcoa(DM_dist, number_of_dimensions=2)
     results = PCoA.samples.copy()
-    df['PC1'], df['PC2'] = results.iloc[:,0].values, results.iloc[:,1].values
-    return df[['PC1', 'PC2']]
+    ndf['PC1'], ndf['PC2'] = results.iloc[:,0].values, results.iloc[:,1].values
+    return ndf[['PC1', 'PC2']]
 
 def nmds(df, **kwargs):
     BC_dist = pd.DataFrame(
@@ -934,6 +979,7 @@ def explainedvariance(df1, df2, pval=True, **kwargs):
     # how does df1 explain variance in df2 where df2 is meta (only categories)
     # should rework this one to include in calculate but hard
     # 4.32 is significant
+    # -np.log(0.05)
     target = DF2.columns[0]
     output = pd.Series()
     for target in DF2.columns:
@@ -963,3 +1009,21 @@ def splitter(df, column, df2='meta', **kwargs):
         metadf[level] = merge
     return metadf
 
+# Misc
+def taxofunc(msp, taxo, short=False):
+    import pandas as pd
+    m, t = msp.copy(), taxo.copy()
+    t['superkingdom'] = 'k_' + t['superkingdom']
+    t['phylum'] = t[['superkingdom', 'phylum']].apply(lambda x: '|p_'.join(x.dropna().astype(str).values), axis=1)
+    t['class'] = t[['phylum', 'class']].apply(lambda x: '|c_'.join(x.dropna().astype(str).values), axis=1)
+    t['order'] = t[['class', 'order']].apply(lambda x: '|o_'.join(x.dropna().astype(str).values), axis=1)
+    t['family'] = t[['order', 'family']].apply(lambda x: '|f_'.join(x.dropna().astype(str).values), axis=1)
+    t['genus'] = t[['family', 'genus']].apply(lambda x: '|g_'.join(x.dropna().astype(str).values), axis=1)
+    t['species'] = t[['genus', 'species']].apply(lambda x: '|s_'.join(x.dropna().astype(str).values), axis=1)
+    mt = m.join(t, how='inner')
+    df = pd.concat([mt.set_index(t.columns[i])._get_numeric_data().groupby(level=0).sum() for i in range(len(t.columns))])
+    df.index = df.index.str.replace(" ", "_", regex=True).str.replace('/.*','', regex=True)
+    if short:
+        df.index = df.T.add_prefix("|").T.index.str.extract(".*\|([a-z]_.*$)", expand=True)[0]
+    df = df.loc[df.sum(axis=1) != 0, df.sum(axis=0) != 0]
+    return df
