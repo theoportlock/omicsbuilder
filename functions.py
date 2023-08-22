@@ -546,7 +546,7 @@ def merge(datasets=None, type='inner', append=None, filename=None):
     return outdf
 
 # Filter 
-def filter(df, min_unique=None, gt=None, lt=None, column=None, filter_df=None, filter_df_axis=0, absgt=None, rowfilt=None, colfilt=None):
+def filter(df, min_unique=None, gt=None, lt=None, column=None, filter_df=None, filter_df_axis=0, absgt=None, rowfilt=None, colfilt=None, nonzero=None):
     if filter_df is not None:
         if filter_df_axis == 1:
             df = df.loc[:, filter_df.index]
@@ -573,6 +573,8 @@ def filter(df, min_unique=None, gt=None, lt=None, column=None, filter_df=None, f
         df = df.loc[:, df.abs().gt(gt).any(axis=0)]
     if column and absgt:
         df = df.loc[df[column].abs().gt(absgt)]
+    if nonzero:
+        df = df.loc[df.sum(axis=1) != 0, df.sum(axis=0) !=0]
     return df
 
 # Explain
