@@ -546,7 +546,7 @@ def merge(datasets=None, type='inner', append=None, filename=None):
     return outdf
 
 # Filter 
-def filter(df, min_unique=None, gt=None, lt=None, column=None, filter_df=None, filter_df_axis=0, absgt=None, rowfilt=None, colfilt=None, nonzero=None):
+def filter(df, min_unique=None, gt=None, lt=None, column=None, filter_df=None, filter_df_axis=0, absgt=None, rowfilt=None, colfilt=None, nonzero=None, prevail=None, abund=None):
     if filter_df is not None:
         if filter_df_axis == 1:
             df = df.loc[:, filter_df.index]
@@ -556,13 +556,10 @@ def filter(df, min_unique=None, gt=None, lt=None, column=None, filter_df=None, f
         df = df.loc[:, df.columns.str.contains(colfilt, regex=True)]
     if rowfilt:
         df = df.loc[df.index.str.contains(rowfilt, regex=True)]
-    if min_unique:
-        '''
-        df = df.loc[
-                df.agg(np.count_nonzero, axis=1) > min_unique,
-                df.agg(np.count_nonzero, axis=0) > min_unique]
-        '''
-        df = df.loc[:, df.agg(np.count_nonzero, axis=0) > min_unique]
+    if prevail:
+        df = df.loc[:, df.agg(np.count_nonzero, axis=0).gt(df.shape[0]*prevail)]
+    if abund:
+        df = df.loc[:, df.mean().gt(abund)]
     if column and lt:
         df = df.loc[df[column].lt(lt)]
     elif lt:
