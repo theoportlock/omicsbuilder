@@ -4,12 +4,12 @@ from itertools import combinations, count, permutations
 from matplotlib_venn import venn3
 from scipy.cluster.hierarchy import linkage, dendrogram
 from scipy.spatial import distance
+from scipy.stats import chi2_contingency
 from scipy.stats import levene, mannwhitneyu, shapiro, spearmanr
 from skbio import stats
 from skbio.diversity.alpha import pielou_e, shannon
 from skbio.stats.composition import ancom, clr
 from skbio.stats.composition import multiplicative_replacement as mul
-from skbio.stats.distance import permanova
 from skbio.stats.distance import permanova
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
@@ -74,7 +74,7 @@ def regressor(df, **kwargs):
         "R-squared score:" + str(r2) + '\n' + \
         'oob score =' + str(model.oob_score_)
     print(performance)
-    with open(f'../results/{subject}performance.txt', 'w') as of: of.write(performance)
+    #with open(f'../results/{subject}performance.txt', 'w') as of: of.write(performance)
     return model, performance
 
 def networkpredict(df):
@@ -82,15 +82,20 @@ def networkpredict(df):
     shaps = pd.DataFrame(index=df.columns)
     for i in df.columns:
         tdf = df.set_index(i)
-        X,y = tdf, tdf.index
+        X,y = tdf,tdf.index
         #X_train, X_test, y_train, y_test =  train_test_split(X,y)
         model = RandomForestRegressor(random_state=1, n_jobs=-1)
         #model.fit(X_train, y_train)
         model.fit(X, y)
         shaps[i] = SHAP_reg(df, model)
-        # careful running this as need to sort out pandas
+        #shp = SHAP_reg(df, model)
+        #shaps[i] = norm(shp.abs().to_frame().T).T[0].mul(shp)
     edges = to_edges(shaps, thresh=0.01)
     return edges
+
+#df = ibq.dropna().join(msp, how='inner').join(vep, how='inner')
+#df = standard(df.T).T
+
 
 def to_edges(df, thresh=0.5, directional=True):
     import pandas as pd
@@ -113,14 +118,14 @@ def predict(analysis, df, **kwargs):
     return output
 
 # Plotting
-def setupplot(agg=False):
+def setupplot(agg=False, figsize=(3,3)):
     if agg: matplotlib.use('Agg')
     linewidth = 0.25
     matplotlib.rcParams['grid.color'] = 'lightgray'
     matplotlib.rcParams["svg.fonttype"] = "none"
     matplotlib.rcParams["font.size"] = 7
     matplotlib.rcParams["lines.linewidth"] = linewidth
-    matplotlib.rcParams["figure.figsize"] = (3, 3)
+    matplotlib.rcParams["figure.figsize"] = figsize
     matplotlib.rcParams["axes.linewidth"] = linewidth
     matplotlib.rcParams['axes.facecolor'] = 'none'
     matplotlib.rcParams['xtick.major.width'] = linewidth
@@ -155,42 +160,19 @@ def clustermap(df, sig=None, figsize=(4,4), corr=False, **kwargs):
     plt.setp(g.ax_heatmap.get_xticklabels(), rotation=40, ha="right")
     return g
 
-def heatmap(df, sig=None, ax=None, **kwargs):
+def heatmap(df, sig=None, ax=None, center=0, **kwargs):
     pd.set_option("use_inf_as_na", True)
     if ax is None: fig, ax= plt.subplots()
-    if not sig is None:
-        sig = pd.read_csv(f'../results/{sig}.tsv', sep='\t', index_col=0)
-        df = df[(sig < 0.05).sum(axis=1) > 0]
-        sig = sig.loc[df.index]
     g = sns.heatmap(
         data=df,
         square=True,
         cmap="vlag",
-        center=0,
+        center=center,
         yticklabels=True,
         xticklabels=True,
+        annot=sig.replace({True:'*',False:''}) if sig is not None else None,
+        fmt='',
     )
-    for tick in g.get_yticklabels(): tick.set_rotation(0)
-    if not sig is None:
-        annot=pd.DataFrame(index=sig.index, columns=sig.columns)
-        annot[(sig < 0.0005) & (df > 0)] = '+++'
-        annot[(sig < 0.005) & (df > 0)] = '++'
-        annot[(sig < 0.05) & (df > 0)] = '+'
-        annot[(sig < 0.0005) & (df < 0)] = '---'
-        annot[(sig < 0.005) & (df < 0)] = '--'
-        annot[(sig < 0.05) & (df < 0)] = '-'
-        annot[sig >= 0.05] = ''
-        for i, ix in enumerate(df.index):
-            for j, jx in enumerate(df.columns):
-                text = g.text(
-                    j + 0.5,
-                    i + 0.5,
-                    annot.values[i,j],
-                    ha="center",
-                    va="center",
-                    color="black",
-                )
-                text.set_fontsize(8)
     plt.setp(g.get_xticklabels(), rotation=40, ha="right")
     return g
 
@@ -264,9 +246,7 @@ def polar(df, **kwargs):
     ax.grid(True)
     return ax
 
-def circos(df, **kwargs):
-    varcol = kwargs.get('varcol')
-    col = pd.read_csv(f'../results/{varcol}.csv', index_col=0).rename_axis('source')
+def circos(edges, col, **kwargs):
     for i, element in col.groupby('datatype', sort=False):
         col.loc[element.index,'ID'] = element.reset_index().reset_index().set_index('source')['index'].astype(int)
     col['ID'] = col.ID.astype('int')
@@ -323,7 +303,7 @@ def hist(df, **kwargs):
 def scatter(df, **kwargs):
     #kwargs['ax'] = plt.subplots()[1] if not kwargs.get('ax') else kwargs.get('ax')
     sns.regplot(data=df, x=kwargs.get('x'), y=kwargs.get('y'), ax=kwargs.get('ax'))
-    return kwargs['ax']
+    #return kwargs['ax']
 
 def box(df, **kwargs):
     df = df.reset_index()
@@ -614,7 +594,7 @@ def SHAP_reg(X, model):
             )
     corrs = [spearmanr(shaps_values.values[:,x], X.iloc[:,x])[0] for x in range(len(X.columns))]
     shaps = pd.DataFrame(shaps_values.values, columns=X.columns, index=X.index)
-    shaps = shaps.loc[:,shaps.sum() != 0]
+    #shaps = shaps.loc[:,shaps.sum() != 0]
     final = meanabsshap * np.sign(corrs)
     final.fillna(0, inplace=True)
     return final
@@ -719,6 +699,58 @@ def corr(df, mult=True):
     return outdf
 
 # Compare - TODO
+def chisq(df, **kwargs):
+    df.index, df.columns = df.index.astype(str), df.columns.astype(str)
+    combs = list(permutations(df.columns.unique(), 2))
+    comb = combs[0]
+    pvals=[]
+    obsa=[]
+    for comb in combs:
+        test = df.loc[:, [comb[0], comb[1]]]
+        obs = pd.crosstab(test.iloc[:,0], test.iloc[:,1])
+        chi2, p, dof, expected = chi2_contingency(obs)
+        exp = pd.DataFrame(expected,index=obs.index, columns=obs.columns)
+        # Test assumptions - if passes con
+        # EX of cells should be <= 5 in 80%
+        # No cell should have EX < 1
+        obsa.append(obs)
+        if (~exp.lt(1).any().any()) & ((exp.gt(5).sum().sum()) / (exp.shape[0] * exp.shape[1]) > 0.8):
+            pvals.append(p)
+        else:
+            pvals.append(np.nan)
+    pvaldf = pd.Series(pvals, index=pd.MultiIndex.from_tuples(combs), dtype=float)
+    obsdict = dict(zip(combs, obsa))
+    '''
+    outdf = pd.Series(np.array(
+        [chi2_contingency(pd.crosstab(df.loc[:,i[0]], df.loc[:,i[1]]))[1] for i in combs]),
+        index = pd.MultiIndex.from_tuples(combs),
+        )
+    '''
+    return obsdict, pvaldf
+
+def fisher(df, **kwargs):
+    # todo - will also make odds ratio plot with SE (to figure out)
+    df.index, df.columns = df.index.astype(str), df.columns.astype(str)
+    combs = list(permutations(df.columns.unique(), 2))
+    comb = combs[0]
+    pvals=[]
+    obsa=[]
+    for comb in combs:
+        test = df.loc[:, [comb[0], comb[1]]]
+        obs = pd.crosstab(test.iloc[:,0], test.iloc[:,1])
+        oddsratio, pvalue = stats.fisher_exact(obs)
+        exp = pd.DataFrame(expected,index=obs.index, columns=obs.columns)
+        # Test assumptions - if passes con
+        # EX of cells should be <= 5 in 80%
+        # No cell should have EX < 1
+        obsa.append(obs)
+        if (~exp.lt(1).any().any()) & ((exp.gt(5).sum().sum()) / (exp.shape[0] * exp.shape[1]) > 0.8):
+            pvals.append(p)
+        else:
+            pvals.append(np.nan)
+    pvaldf = pd.Series(pvals, index=pd.MultiIndex.from_tuples(combs), dtype=float)
+    obsdict = dict(zip(combs, obsa))
+    return obsdict, pvaldf
 
 # Change
 def shapiro(df, **kwargs):
@@ -786,6 +818,32 @@ def lfc(df, **kwargs):
     outdf = outdf.replace([np.inf, -np.inf], np.nan)
     return outdf
 
+def fc(df, **kwargs):
+    df.index, df.columns = df.index.astype(str), df.columns.astype(str)
+    combs = list(combinations(df.index.unique(), 2))
+    if kwargs.get('perm'): combs = list(permutations(df.index.unique(), 2))
+    outdf = pd.DataFrame(np.array(
+        [df.loc[i[0]].mean().div(df.loc[i[1]].mean()) for i in combs]),
+        columns = df.columns,
+        index = combs
+        ).T
+    outdf.columns = outdf.columns.str.join('/')
+    outdf = outdf.replace([np.inf, -np.inf], np.nan)
+    return outdf
+
+def diff(df, **kwargs):
+    df.index, df.columns = df.index.astype(str), df.columns.astype(str)
+    combs = list(combinations(df.index.unique(), 2))
+    if kwargs.get('perm'): combs = list(permutations(df.index.unique(), 2))
+    outdf = pd.DataFrame(np.array(
+        [df.loc[i[0]].mean().sub(df.loc[i[1]].mean()) for i in combs]),
+        columns = df.columns,
+        index = combs
+        ).T
+    outdf.columns = outdf.columns.str.join('-')
+    outdf = outdf.replace([np.inf, -np.inf], np.nan)
+    return outdf
+
 def prevail(df, **kwargs):
     df.index, df.columns = df.index.astype(str), df.columns.astype(str)
     basemean = df.mean().to_frame('basemean')
@@ -811,6 +869,8 @@ def change(df, analysis=['prevail','lfc','mww'], **kwargs):
         'prevail':prevail,
         'mww':mww,
         'lfc':lfc,
+        'diff':diff,
+        'fc':fc,
         'ancom':ANCOM,
         'std':std,
         }
@@ -869,6 +929,7 @@ def pcoa(df, **kwargs):
     Ar_dist = distance.squareform(distance.pdist(ndf, metric="braycurtis"))
     DM_dist = skbio.stats.distance.DistanceMatrix(Ar_dist)
     PCoA = skbio.stats.ordination.pcoa(DM_dist, number_of_dimensions=2)
+    print(PCoA.proportion_explained)
     results = PCoA.samples.copy()
     ndf['PC1'], ndf['PC2'] = results.iloc[:,0].values, results.iloc[:,1].values
     return ndf[['PC1', 'PC2']]
@@ -943,7 +1004,7 @@ def minmax(df):
 def log(df):
     return df.apply(np.log1p)
 
-def clr(df):
+def CLR(df):
     return pd.DataFrame(clr(df), index=df.index, columns=df.columns)
 
 def mult(df):
@@ -955,7 +1016,7 @@ def scale(analysis, df):
         'standard':standard,
         'minmax':minmax,
         'log':log,
-        'clr':clr,
+        'CLR':CLR,
         'mult':mult,
         }
     output = available.get(analysis)(df)
@@ -963,7 +1024,7 @@ def scale(analysis, df):
 
 # Variance
 def PERMANOVA(df, pval=True, full=False, **kwargs):
-    #with open(f'../results/{df1}variance.txt','w') as of: of.write(output.to_string())
+    np.random.seed(0)
     Ar_dist = distance.squareform(distance.pdist(df, metric="braycurtis"))
     DM_dist = skbio.stats.distance.DistanceMatrix(Ar_dist)
     result = permanova(DM_dist, df.index)
@@ -1026,3 +1087,29 @@ def taxofunc(msp, taxo, short=False):
         df.index = df.T.add_prefix("|").T.index.str.extract(".*\|([a-z]_.*$)", expand=True)[0]
     df = df.loc[df.sum(axis=1) != 0, df.sum(axis=0) != 0]
     return df
+
+def fdr(pvaldf):
+    out = pd.DataFrame(
+        fdrcorrection(pvaldf.values.flatten())[1].reshape(pvaldf.shape),
+        index = pvaldf.index,
+        columns = pvaldf.columns)
+    return out
+
+def batch(df):
+    out = pycombat(df.T,df.index).T
+    return out
+
+def lmer(df): 
+    import statsmodels.formula.api as smf
+    import statsmodels.api as sm
+    data = pd.read_csv('/tmp/dietox.csv', index_col=0)
+    md = smf.mixedlm("Weight ~ Time", data, groups=data["Pig"])
+    mdf = md.fit()
+    print(mdf.summary())
+
+def MERF(df):
+    from merf.utils import MERFDataGenerator
+    from merf.merf import MERF
+    from merf.viz import plot_merf_training_stats
+    mrf = MERF(max_iterations=5)
+    mrf.fit(X_train, Z_train, clusters_train, y_train)
