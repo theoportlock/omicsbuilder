@@ -1,11 +1,10 @@
-#!/usr/bin/env/ python
+#!/usr/bin/env python
 
 from itertools import combinations, count, permutations
 from matplotlib_venn import venn3
 from scipy.cluster.hierarchy import linkage, dendrogram
 from scipy.spatial import distance
-from scipy.stats import chi2_contingency
-from scipy.stats import levene, mannwhitneyu, shapiro, spearmanr
+from scipy.stats import chi2_contingency, fisher_exact, zscore, levene, mannwhitneyu, shapiro, spearmanr
 from skbio import stats
 from skbio.diversity.alpha import pielou_e, shannon
 from skbio.stats.composition import ancom, clr
@@ -29,21 +28,14 @@ import numpy as np
 import os
 import pandas as pd
 import pickle
+import pycircos
 import seaborn as sns
 import shap
+import shutil
 import skbio
 import statannot
 import subprocess
-import sys
 import umap
-
-# Load
-def load(subject):
-    return pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0)
-
-# Save
-def save(df, subject):
-    df.to_csv(f'../results/{subject}.tsv', sep='\t')
 
 # Prediction
 def classifier(df, **kwargs):
@@ -93,22 +85,6 @@ def networkpredict(df):
     edges = to_edges(shaps, thresh=0.01)
     return edges
 
-#df = ibq.dropna().join(msp, how='inner').join(vep, how='inner')
-#df = standard(df.T).T
-
-
-def to_edges(df, thresh=0.5, directional=True):
-    import pandas as pd
-    df = df.rename_axis('source', axis=0).rename_axis("target", axis=1)
-    edges = df.stack().to_frame()[0]
-    nedges = edges.reset_index()
-    edges = nedges[nedges.target != nedges.source].set_index(['source','target']).drop_duplicates()[0]
-    if directional:
-        fin = edges.loc[(edges < 0.99) & (edges.abs() > thresh)].dropna().reset_index().rename(columns={'level_0': 'source', 'level_1':'target', 0:'weight'}).set_index('source').sort_values('weight')
-    else:
-        fin = edges.loc[(edges < 0.99) & (edges > thresh)].dropna().reset_index().rename(columns={'level_0': 'source', 'level_1':'target', 0:'weight'}).set_index('source').sort_values('weight')
-    return fin
-
 def predict(analysis, df, **kwargs):
     available={
         'regressor':regressor,
@@ -118,7 +94,7 @@ def predict(analysis, df, **kwargs):
     return output
 
 # Plotting
-def setupplot(agg=False, figsize=(3,3)):
+def setupplot(grid=False, agg=False, figsize=(3,3)):
     if agg: matplotlib.use('Agg')
     linewidth = 0.25
     matplotlib.rcParams['grid.color'] = 'lightgray'
@@ -132,6 +108,8 @@ def setupplot(agg=False, figsize=(3,3)):
     matplotlib.rcParams['ytick.major.width'] = linewidth
     matplotlib.rcParams['font.family'] = 'Arial'
     matplotlib.rcParams['axes.axisbelow'] = True
+    if grid: plt.grid(alpha=0.3)
+
 
 def clustermap(df, sig=None, figsize=(4,4), corr=False, **kwargs):
     pd.set_option("use_inf_as_na", True)
@@ -246,18 +224,31 @@ def polar(df, **kwargs):
     ax.grid(True)
     return ax
 
-def circos(edges, col, **kwargs):
-    for i, element in col.groupby('datatype', sort=False):
-        col.loc[element.index,'ID'] = element.reset_index().reset_index().set_index('source')['index'].astype(int)
-    col['ID'] = col.ID.astype('int')
-    data = edges.join(col[['ID','datatype']], how='inner').rename(columns={'datatype':'datatype1', 'ID':'index1'})
-    data = data.reset_index().set_index('target').join(col[['ID','datatype']], how='inner').rename_axis('target').rename(columns={'datatype':'datatype2', 'ID':'index2'}).reset_index()
-    # remove internal correlations
+def circos(datasets, thresh=0.5, **kwargs):
+    '''
+    datasets = {'msp':f.load('msp'),
+                'eeg':f.load('eeg'),
+                'pathways':f.load('pathways')} 
+    thresh=0.5
+    '''
+    out, labs = [], []
+    for data in datasets:
+        tdf = datasets[data]
+        out.append(tdf)
+        tmp = tdf.columns.to_frame()
+        tmp.index = tmp.shape[0] * [data]
+        tmp = tmp.reset_index().reset_index().set_axis(['ID','datatype','var'], axis=1).set_index('var')
+        labs.append(tmp)
+    labels = pd.concat(labs)
+    alldata = pd.concat(out, axis=1, join='inner')
+    edges = to_edges(alldata.corr(), thresh=thresh)
+    data = edges.join(labels[['ID','datatype']], how='inner').rename(columns={'datatype':'datatype1', 'ID':'index1'})
+    data = data.reset_index().set_index('target').join(labels[['ID','datatype']], how='inner').rename_axis('target').rename(columns={'datatype':'datatype2', 'ID':'index2'}).reset_index()
     data = data.loc[data.datatype1 != data.datatype2]
     Gcircle = pycircos.Gcircle
     Garc = pycircos.Garc
     circle = Gcircle()
-    for i, row in col.groupby('datatype', sort=False):
+    for i, row in labels.groupby('datatype', sort=False):
         arc = Garc(arc_id=i,
                    size=row['ID'].max(),
                    interspace=30,
@@ -732,24 +723,21 @@ def fisher(df, **kwargs):
     # todo - will also make odds ratio plot with SE (to figure out)
     df.index, df.columns = df.index.astype(str), df.columns.astype(str)
     combs = list(permutations(df.columns.unique(), 2))
-    comb = combs[0]
     pvals=[]
-    obsa=[]
+    odsa=[]
+    comb = combs[0]
     for comb in combs:
         test = df.loc[:, [comb[0], comb[1]]]
         obs = pd.crosstab(test.iloc[:,0], test.iloc[:,1])
-        oddsratio, pvalue = stats.fisher_exact(obs)
-        exp = pd.DataFrame(expected,index=obs.index, columns=obs.columns)
-        # Test assumptions - if passes con
-        # EX of cells should be <= 5 in 80%
-        # No cell should have EX < 1
-        obsa.append(obs)
-        if (~exp.lt(1).any().any()) & ((exp.gt(5).sum().sum()) / (exp.shape[0] * exp.shape[1]) > 0.8):
-            pvals.append(p)
-        else:
-            pvals.append(np.nan)
-    pvaldf = pd.Series(pvals, index=pd.MultiIndex.from_tuples(combs), dtype=float)
-    obsdict = dict(zip(combs, obsa))
+        try:
+            oddsratio, pvalue = fisher_exact(obs)
+        except:
+            odssratio, pvalue = np.nan, np.nan
+        odsa.append(oddsratio)
+        pvals.append(pvalue)
+    outdf = pd.DataFrame(index=pd.MultiIndex.from_tuples(combs), dtype=float)
+    outdf['odds'] = odsa
+    outdf['pvals'] = pvals
     return obsdict, pvaldf
 
 # Change
@@ -882,7 +870,7 @@ def change(df, analysis=['prevail','lfc','mww'], **kwargs):
     return out
 
 # Calculate
-def diversity(df, **kwargs):
+def diversity(df):
     def Richness(df, axis=1): return df.agg(np.count_nonzero, axis=axis)
     def Evenness(df, axis=1): return df.agg(pielou_e, axis=axis)
     def Shannon(df, axis=1): return df.agg(shannon, axis=axis)
@@ -893,7 +881,7 @@ def diversity(df, **kwargs):
             axis=1).sort_index().sort_index(ascending=False)
     return diversity
 
-def fbratio(df, **kwargs):
+def fbratio(df):
     phylum = df.copy()
     phylum.columns = phylum.columns.str.extract('p__(.*)\|c')[0]
     taxoMsp = phylum.T.groupby(phylum.columns).sum()
@@ -905,7 +893,7 @@ def fbratio(df, **kwargs):
     FB = FB.reset_index().set_axis(['Host Phenotype', 'FB_Ratio'], axis=1).set_index('Host Phenotype')
     return FB
 
-def pbratio(df, **kwargs):
+def pbratio(df):
     genus = df.copy()
     genus.columns = genus.columns.str.extract('g__(.*)\|s')[0]
     taxoMsp = genus.T.groupby(genus.columns).sum()
@@ -917,14 +905,14 @@ def pbratio(df, **kwargs):
     pb = pb.reset_index().set_axis(['Host Phenotype', 'PB_Ratio'], axis=1).set_index('Host Phenotype')
     return pb
 
-def pca(df, **kwargs):
+def pca(df):
     scaledDf = StandardScaler().fit_transform(df)
     pca = PCA()
     results = pca.fit_transform(scaledDf).T
     df['PC1'], df['PC2'] = results[0,:], results[1,:]
     return df[['PC1', 'PC2']]
 
-def pcoa(df, **kwargs):
+def pcoa(df):
     ndf = df.copy()
     Ar_dist = distance.squareform(distance.pdist(ndf, metric="braycurtis"))
     DM_dist = skbio.stats.distance.DistanceMatrix(Ar_dist)
@@ -934,7 +922,7 @@ def pcoa(df, **kwargs):
     ndf['PC1'], ndf['PC2'] = results.iloc[:,0].values, results.iloc[:,1].values
     return ndf[['PC1', 'PC2']]
 
-def nmds(df, **kwargs):
+def nmds(df):
     BC_dist = pd.DataFrame(
         distance.squareform(distance.pdist(df, metric="braycurtis")),
         columns=df.index,
@@ -944,30 +932,30 @@ def nmds(df, **kwargs):
     df['PC1'], df['PC2'] = results[:,0], results[:,1]
     return df[['PC1', 'PC2']]
 
-def tsne(df, **kwargs):
+def tsne(df):
     results = TSNE(n_components=2, learning_rate='auto', init='random').fit_transform(df)
     df['PC1'], df['PC2'] = results[:,0], results[:,1]
     return df[['PC1', 'PC2']]
 
-def top20(df, **kwargs):
+def top20(df):
     if df.shape[1] > 20:
         df['other'] = df[df.sum().sort_values(ascending=False).iloc[19:].index].sum(axis=1)
     df = df[df.sum().sort_values().tail(20).index]
     return df
 
-def som(df, **kwargs):
+def som(df):
     som = SOM(m=3, n=1, dim=2)
     som.fit(df)
     return som
 
-def umap(df, **kwargs):
+def umap(df):
     scaledDf = StandardScaler().fit_transform(df)
     reducer = umap.UMAP()
     results = reducer.fit_transform(scaledDf)
     df['PC1'], df['PC2'] = results[:,0], results[:,1]
     return df[['PC1', 'PC2']]
 
-def calculate(analysis, df, **kwargs):
+def calculate(analysis, df):
     available={
         'diversity':diversity,
         'fbratio':fbratio,
@@ -980,12 +968,15 @@ def calculate(analysis, df, **kwargs):
         'som':som,
         'umap':umap,
         }
-    output = available.get(analysis)(df, **kwargs)
+    output = available.get(analysis)(df)
     return output
 
 # Scale
 def norm(df):
     return df.T.div(df.sum(axis=1), axis=1).T
+
+def zscore(df, axis=0):
+    return df.apply(zscore, axis=axis)
 
 def standard(df):
     scaledDf = pd.DataFrame(
@@ -1062,7 +1053,8 @@ def stratify(df, meta, level):
     return metadf
 
 # Splitter
-def splitter(df, column, df2='meta', **kwargs):
+def splitter(df, df2, column, **kwargs):
+    # needs work
     metadf = pd.DataFrame()
     for level in meta[column].unique():
         merge = df.join(meta.loc[meta[column] == level, column], how='inner').drop(column, axis=1)
@@ -1113,3 +1105,23 @@ def MERF(df):
     from merf.viz import plot_merf_training_stats
     mrf = MERF(max_iterations=5)
     mrf.fit(X_train, Z_train, clusters_train, y_train)
+
+def load(subject, **kwargs):
+    return pd.read_csv(f'../results/{subject}.tsv', sep='\t', index_col=0, **kwargs)
+
+def save(df, subject, **kwargs):
+    df.to_csv(f'../results/{subject}.tsv', sep='\t', **kwargs)
+
+def to_edges(df, thresh=0.5, directional=True):
+    df = df.rename_axis('source', axis=0).rename_axis("target", axis=1)
+    edges = df.stack().to_frame()[0]
+    nedges = edges.reset_index()
+    edges = nedges[nedges.target != nedges.source].set_index(['source','target']).drop_duplicates()[0]
+    if directional:
+        fin = edges.loc[(edges < 0.99) & (edges.abs() > thresh)].dropna().reset_index().rename(columns={'level_0': 'source', 'level_1':'target', 0:'weight'}).set_index('source').sort_values('weight')
+    else:
+        fin = edges.loc[(edges < 0.99) & (edges > thresh)].dropna().reset_index().rename(columns={'level_0': 'source', 'level_1':'target', 0:'weight'}).set_index('source').sort_values('weight')
+    return fin
+
+if __name__ == '__main__':
+    print(vars().keys())
