@@ -5,18 +5,31 @@ import argparse
 import functions as f
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
 
 parser = argparse.ArgumentParser(description='''
-Pointheatmap - Produces a pointheatmap of a given dataset
+Box - Produces a Boxplot of a given dataset
 ''')
+
 parser.add_argument('subject')
+parser.add_argument('-x')
+parser.add_argument('-y')
+parser.add_argument('--hue')
+
 known, unknown = parser.parse_known_args()
 known = {k: v for k, v in vars(known).items() if v is not None}
 unknown = eval(unknown[0]) if unknown != [] else {}
 
+'''
+np.array(unknown).reshape(2,:)
+unk = [[a,a+1] for a in unknown 
+unknown = {k.replace('-',''): v for k, v in unknown if v is not None}
+'''
+
 f.setupplot()
-subject = known.get("subject")
+subject = known.get("subject"); known.pop("subject")
 df = f.load(subject)
-output = f.pointheatmap(df, **unknown)
-plt.savefig(f'../results/{subject}heatmap.svg')
+
+output = f.box(df, **known)
+plt.savefig(f'../results/{subject}box.svg')
 plt.show()

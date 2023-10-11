@@ -203,22 +203,20 @@ def spindle(df, x='PC1', y='PC2', ax=None, palette=None, **kwargs):
 
 def polar(df, **kwargs):
     palette = pd.Series(sns.color_palette("hls", df.index.nunique()).as_hex(), index=df.index.unique())
-    ndf = df.loc[~df.index.str.contains('36'), df.columns.str.contains('Raw')].groupby(level=0).mean()
-    data = ndf.T.copy().to_numpy()
-    angles = np.linspace(0, 2*np.pi, len(ndf.columns), endpoint=False)
+    data = df.T.copy().to_numpy()
+    angles = np.linspace(0, 2*np.pi, len(df.columns), endpoint=False)
     data = np.concatenate((data, [data[0]]))
     angles = np.concatenate((angles, [angles[0]]))
-    categories = ndf.columns.to_list()
-    loopcategories = ndf.columns.to_list()
+    categories = df.columns.to_list()
+    loopcategories = df.columns.to_list()
     loopcategories.append(df.columns[0])
-    alldf = pd.DataFrame(data=data, index = loopcategories, columns=ndf.index).T
+    alldf = pd.DataFrame(data=data, index = loopcategories, columns=df.index).T
     allangles = pd.Series(data=angles, index=loopcategories)
     fig = plt.figure()
     ax = fig.add_subplot(111, polar=True)
     for color in alldf.index.unique():
         plotdf = alldf.loc[alldf.index==color]
         ax.plot(allangles, plotdf.T, linewidth=1, color = palette[color])
-    plt.title('Radial Line Graph')
     ax.set_xticks(allangles[:-1])
     ax.set_xticklabels(categories)
     ax.grid(True)
@@ -286,14 +284,15 @@ def bar(df, **kwargs):
 
 def hist(df, **kwargs):
     kwargs['ax'] = plt.subplots()[1] if not kwargs.get('ax') else kwargs.get('ax')
-    kwargs['col'] = 'sig' if not kwargs.get('col') else kwargs.get('col')
-    kwargs['ax'] = sns.histplot(data=df[kwargs['col']])
+    kwargs['column'] = 'sig' if not kwargs.get('column') else kwargs.get('column')
+    kwargs['ax'] = sns.histplot(data=df[kwargs['column']])
     plt.setp(kwargs['ax'].get_xticklabels(), rotation=45, ha="right")
     return kwargs['ax']
 
 def scatter(df, **kwargs):
     #kwargs['ax'] = plt.subplots()[1] if not kwargs.get('ax') else kwargs.get('ax')
-    sns.regplot(data=df, x=kwargs.get('x'), y=kwargs.get('y'), ax=kwargs.get('ax'))
+    #sns.regplot(data=df, x=kwargs.get('x'), y=kwargs.get('y'), ax=kwargs.get('ax'), **kwargs)
+    sns.regplot(**kwargs)
     #return kwargs['ax']
 
 def box(df, **kwargs):
@@ -514,6 +513,14 @@ def merge(datasets=None, type='inner', append=None, filename=None):
         outdf = pd.concat(datasets, axis=0, join=type)
     else:
         outdf = pd.concat(datasets, axis=1, join=type)
+    return outdf
+
+# Group
+def group(df, type='sum'):
+    if type=='sum':
+        outdf = df.groupby(level=0).sum()
+    elif type=='mean':
+        outdf = df.groupby(level=0).mean()
     return outdf
 
 # Filter 
@@ -738,7 +745,7 @@ def fisher(df, **kwargs):
     outdf = pd.DataFrame(index=pd.MultiIndex.from_tuples(combs), dtype=float)
     outdf['odds'] = odsa
     outdf['pvals'] = pvals
-    return obsdict, pvaldf
+    return outdf
 
 # Change
 def shapiro(df, **kwargs):
@@ -980,9 +987,9 @@ def zscore(df, axis=0):
 
 def standard(df):
     scaledDf = pd.DataFrame(
-            StandardScaler().fit_transform(df.T),
-            index=df.T.index,
-            columns=df.T.columns).T
+            StandardScaler().fit_transform(df),
+            index=df.index,
+            columns=df.columns)
     return scaledDf
 
 def minmax(df):

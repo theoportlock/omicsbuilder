@@ -7,16 +7,24 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 parser = argparse.ArgumentParser(description='''
-Pointheatmap - Produces a pointheatmap of a given dataset
+Box - Produces a Boxplot of a given dataset
 ''')
+
 parser.add_argument('subject')
+parser.add_argument('--change')
+parser.add_argument('--sig')
+parser.add_argument('--fc')
+parser.add_argument('--pval')
+parser.add_argument('--annot')
+
 known, unknown = parser.parse_known_args()
 known = {k: v for k, v in vars(known).items() if v is not None}
 unknown = eval(unknown[0]) if unknown != [] else {}
 
 f.setupplot()
-subject = known.get("subject")
+subject = known.get("subject"); known.pop("subject")
 df = f.load(subject)
-output = f.pointheatmap(df, **unknown)
-plt.savefig(f'../results/{subject}heatmap.svg')
+
+output = f.volcano(df, **known)
+plt.savefig(f'../results/{subject}volcano.svg')
 plt.show()

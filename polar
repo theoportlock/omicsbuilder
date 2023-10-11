@@ -3,21 +3,20 @@
 
 import argparse
 import functions as f
+import matplotlib.pyplot as plt
 import pandas as pd
 
 parser = argparse.ArgumentParser(description='''
-Change - Produces a report of the significant feature changes
+Polar - Produces a Polarplot of a given dataset
 ''')
-
 parser.add_argument('subject')
-parser.add_argument('-a', '--analysis', nargs='+')
-parser.add_argument('--mult', action='store_true')
 known, unknown = parser.parse_known_args()
 known = {k: v for k, v in vars(known).items() if v is not None}
 unknown = eval(unknown[0]) if unknown != [] else {}
 
-df = f.load(known.get("subject"))
-output = f.change(df, **known|unknown)
-print(output)
-f.save(output, f'{known.get("subject")}change')
-
+f.setupplot()
+subject = known.get("subject")
+df = f.load(subject)
+output = f.polar(df, **unknown)
+plt.savefig(f'../results/{subject}polar.svg')
+plt.show()

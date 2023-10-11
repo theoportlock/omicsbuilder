@@ -17,13 +17,19 @@ parser.add_argument('-m', '--min_unique', type=int)
 parser.add_argument('-fdf', '--filter_df')
 parser.add_argument('-fdfx', '--filter_df_axis', type=int)
 parser.add_argument('-absgt', type=float)
+parser.add_argument('-p', '--prevail', type=float)
+parser.add_argument('-a', '--abund', type=float)
 known, unknown = parser.parse_known_args()
 known = {k: v for k, v in vars(known).items() if v is not None}
 unknown = eval(unknown[0]) if unknown != [] else {}
 
-df = pd.read_csv(f'../results/{known.get("subject")}.tsv', sep='\t', index_col=0)
+subject = known.get("subject")
+known.pop('subject')
+df = f.load(subject)
+
 if known.get("filter_df"):
     known['filter_df'] = pd.read_csv(f'../results/{known.get("filter_df")}.tsv', sep='\t', index_col=0)
+
 output = f.filter(df, **known|unknown)
-print(output.to_string())
-output.to_csv(f'../results/{known.get("subject")}filter.tsv', sep='\t')
+print(output)
+f.save(output, subject + 'filter')
